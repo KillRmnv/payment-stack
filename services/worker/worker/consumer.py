@@ -1,4 +1,5 @@
 import logging
+import time
 
 import pika
 import psycopg
@@ -100,9 +101,15 @@ def main():
                 ch.basic_ack(method.delivery_tag)
             else:
                 MESSAGES.labels("retry").inc()
-                # Без blocking sleep: републикация сразу, hot-loop гасится
-                # prefetch=1 + roundtrip через брокер. Блокирующий sleep
-                # останавливал весь consumer на секунды.
+                # Backoff нужен: без него x5 ретраев пролетают за миллисекунды
+                # и сообщение улетает в DLQ при коротком чихе провайдера
+                # (проверено учением fail-mode 12s: без sleep — dlq, со sleep — COMPLETED).
+                # Consumer однопоточный с prefetch=1 по дизайну (один трансфер за раз),
+                # поэтому sleep здесь — осознанный компромисс, а не баг:
+                # зависший провайдер виден через OldestPendingTooOld/DlqNonEmpty.
+                delay = min(2**retries, 16)
+                log.info("retry %s/%s in %ss", retries + 1, MAX_RETRIES, delay)
+                time.sleep(delay)
                 ch.basic_publish(
                     exchange="",
                     routing_key=QUEUE,

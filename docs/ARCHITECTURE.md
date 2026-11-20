@@ -5,7 +5,7 @@ client -> reverse-proxy (nginx:80) -> api:8000 (/transfers, /health, /metrics)
 api -> db (postgres:5432) : INSERT PENDING
 api -> rabbitmq (transfers durable) : {"transfer_id"}
 worker -> db FOR UPDATE (строка трансфера, фильтр PENDING в коде после лока) -> mock-provider:9443/payouts (mTLS-ish, verify /certs/cert.pem) -> UPDATE COMPLETED
-worker -x-> transfers.dlq (poison/LookupError сразу, retriable max-retries 5 с немедленной републикацией без blocking sleep, prefetch=1)
+worker -x-> transfers.dlq (poison/LookupError сразу, retriable max-retries 5 с экспоненциальным backoff min(2^retry,16s), prefetch=1)
 prometheus:9090 <- api:8000/metrics, worker:8001 (+ alertmanager:9093 scrape)
 alertmanager:9093 <- prometheus (доставка по умолчанию blackhole, свой receiver в monitoring/alertmanager.yml)
 vault:8200 -> seed/render (exec) -> runtime.env (POSTGRES_PASSWORD, RABBITMQ_DEFAULT_PASS, PROVIDER_API_KEY)

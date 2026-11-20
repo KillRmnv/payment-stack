@@ -10,5 +10,5 @@
 - Registry GC, retention тегов — не настроены; secrets-scan в CI — только Trivy image/fs, без подписей.
 - Cron бэкапа — `deploy/backup.cron` на хосте (`0 * * * * make backup`), retention локально `KEEP_DAYS=14`, шифрования дампов нет.
 - `reporting-ui` из стартера удален как дрейф — вернуть при нужде отдельным overlay.
-- Retry без blocking sleep: немедленная републикация (prefetch=1 + roundtrip через брокер гасят hot-loop). Экспоненциальный backoff с jitter — только через DLX/TTL, здесь осознанно не делаем.
+- Retry с экспоненциальным backoff в consumer (блокирует один воркер на `min(2^retry,16s)`): осознанный компромисс однопоточного prefetch=1 — без backoff короткий чих провайдера сразу дает DLQ. Экспоненциальный backoff с jitter через DLX/TTL — только при росте нагрузки, здесь не делаем.
 - `worker_dlq_published_total` — Counter опубликованных в DLQ (бывший `worker_dlq_depth` Gauge врал после ручной чистки DLQ).

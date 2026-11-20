@@ -31,7 +31,7 @@ make deploy ENV=stage
 `--strict` отказывается от плейсхолдеров короче 12 символов / `change-me*` / `test-*`.
 
 ## Очередь растет (PENDING стареет)
-1. `curl localhost:8080/metrics | grep -E "pending|worker_messages"` 2. `docker compose exec -T rabbitmq rabbitmqctl list_queues` (UI 15672 только в stage на 127.0.0.1) 3. `docker compose logs worker` (retry/poison/dlq, `request_id=transfer_id`) 4. Проверь `mock-provider failing` (с ключом: `curl -X POST -H 'X-Admin-Key: $PROVIDER_API_KEY' .../admin/fail-mode`) и алерты `PoisonQueueGrowing(old)/DlqNonEmpty(poison|dlq)/OldestPendingTooOld(>300s 5m)/MetricsStaleBusiness`. Републикация без sleep (prefetch=1), `LookupError` (нет transfer) идет сразу в DLQ как poison, не в retry.
+1. `curl localhost:8080/metrics | grep -E "pending|worker_messages"` 2. `docker compose exec -T rabbitmq rabbitmqctl list_queues` (UI 15672 только в stage на 127.0.0.1) 3. `docker compose logs worker` (retry/poison/dlq, `request_id=transfer_id`) 4. Проверь `mock-provider failing` (с ключом: `curl -X POST -H 'X-Admin-Key: $PROVIDER_API_KEY' .../admin/fail-mode`) и алерты `PoisonQueueGrowing(old)/DlqNonEmpty(poison|dlq)/OldestPendingTooOld(>300s 5m)/MetricsStaleBusiness`. Републикация с экспоненциальным backoff `min(2^retry,16s)` (окно ~31с на 5 ретраев), `LookupError` (нет transfer) идет сразу в DLQ как poison, не в retry.
 
 ## БД недоступна
 `api /health` → 503 `{"db":"down"}`, smoke падает → автооткат кода (БД та же). Чини:
