@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 import pytest
-
 from app.validation import InvalidTransfer, parse_transfer, to_minor
 
 

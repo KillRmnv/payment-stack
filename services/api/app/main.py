@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import time
 import uuid
@@ -36,7 +37,7 @@ async def health(request):
         with psycopg.connect(settings.dsn) as conn:
             conn.execute("SELECT 1")
         checks["db"] = "up"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — any DB error means "down", never 500
         log.warning("health db down: %s", exc)
         checks["db"] = "down"
     checks["broker"] = "up" if broker.ping(settings) else "down"
@@ -108,14 +109,12 @@ async def metrics(request):
             prow = conn.execute("SELECT count(*), COALESCE(EXTRACT(EPOCH FROM (now()-min(created_at))),0) FROM transfers WHERE status='PENDING'").fetchone()
             PENDING.set(prow[0] or 0)
             OLDEST_PENDING.set(float(prow[1] or 0))
-    except Exception:
+    except Exception:  # noqa: BLE001 — /metrics must never 500 on DB outage
         # БД недоступна: не отдаем stale значения — сбрасываем в NaN,
         # иначе OldestPendingTooOld зависнет на последнем значении.
-        try:
+        with contextlib.suppress(Exception):  # gauges best-effort, never raise
             PENDING.set(float("nan"))
             OLDEST_PENDING.set(float("nan"))
-        except Exception:
-            pass
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

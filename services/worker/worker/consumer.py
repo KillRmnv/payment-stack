@@ -43,10 +43,7 @@ def publish_dlq(channel, body, reason):
     channel.queue_declare(queue=DLQ, durable=True)
     channel.basic_publish(exchange="", routing_key=DLQ, body=body,
                           properties=pika.BasicProperties(delivery_mode=2, headers={"x-death-reason": reason}))
-    try:
-        DLQ_DEPTH.inc()
-    except Exception:
-        pass
+    DLQ_DEPTH.inc()
 
 
 def main():

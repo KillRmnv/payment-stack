@@ -30,5 +30,5 @@ def ping(settings):
         connection = pika.BlockingConnection(_params(settings))
         connection.close()
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — any failure means "broker is down"
         return False

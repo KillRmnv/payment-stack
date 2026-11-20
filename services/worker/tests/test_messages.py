@@ -1,7 +1,6 @@
 import uuid
 
 import pytest
-
 from worker.messages import PoisonMessage, parse_message
 
 
