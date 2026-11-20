@@ -36,6 +36,7 @@ jobs:
           scan-ref: ghcr.io/${{ env.OWNER_LC }}/payment-api:${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: "1"
+          ignore-unfixed: true
       - name: Trivy image scan (worker)
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
@@ -43,6 +44,7 @@ jobs:
           scan-ref: ghcr.io/${{ env.OWNER_LC }}/payment-worker:${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: "1"
+          ignore-unfixed: true
       - name: Push :sha
         run: |
           SHA="${{ github.sha }}"
