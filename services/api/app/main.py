@@ -14,7 +14,9 @@ from .config import load_settings
 from .validation import InvalidTransfer, parse_transfer, to_minor
 
 settings = load_settings()
-logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
 log = logging.getLogger("api")
 # Never log secrets: only safe fields.
 log.info("starting api version=%s log_level=%s", settings.app_version, settings.log_level)
@@ -26,7 +28,11 @@ OLDEST_PENDING = Gauge("api_oldest_pending_seconds", "Age of oldest PENDING tran
 
 
 def count(request, response):
-    path = request.url.path.split("/")[1] if "/" in request.url.path[1:] else request.url.path.strip("/")
+    path = (
+        request.url.path.split("/")[1]
+        if "/" in request.url.path[1:]
+        else request.url.path.strip("/")
+    )
     REQUESTS.labels(request.method, path or "root", response.status_code).inc()
     return response
 
@@ -106,7 +112,9 @@ async def get_transfer(request):
 async def metrics(request):
     try:
         with psycopg.connect(settings.dsn) as conn:
-            prow = conn.execute("SELECT count(*), COALESCE(EXTRACT(EPOCH FROM (now()-min(created_at))),0) FROM transfers WHERE status='PENDING'").fetchone()
+            prow = conn.execute(
+                "SELECT count(*), COALESCE(EXTRACT(EPOCH FROM (now()-min(created_at))),0) FROM transfers WHERE status='PENDING'"
+            ).fetchone()
             PENDING.set(prow[0] or 0)
             OLDEST_PENDING.set(float(prow[1] or 0))
     except Exception:  # noqa: BLE001 — /metrics must never 500 on DB outage

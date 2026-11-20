@@ -24,7 +24,12 @@ async def create_payout(request):
     key = request.headers.get("Idempotency-Key") or uuid.uuid4().hex
     body = await request.json()
     payout = state["payouts"].setdefault(
-        key, {"payout_id": f"po_{uuid.uuid4().hex[:16]}", "status": "COMPLETED", "reference": body.get("reference")}
+        key,
+        {
+            "payout_id": f"po_{uuid.uuid4().hex[:16]}",
+            "status": "COMPLETED",
+            "reference": body.get("reference"),
+        },
     )
     return JSONResponse(payout, status_code=201)
 

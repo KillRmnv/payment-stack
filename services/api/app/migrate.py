@@ -25,7 +25,9 @@ def run(dsn, directory):
                     continue
                 with conn.transaction():
                     conn.execute(path.read_text())
-                    conn.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (path.name,))
+                    conn.execute(
+                        "INSERT INTO schema_migrations (version) VALUES (%s)", (path.name,)
+                    )
                 log.info("applied %s", path.name)
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (LOCK_ID,))

@@ -18,12 +18,12 @@ groups:
         annotations: {summary: "API p99 > 1s for 5m"}
       - alert: PoisonQueueGrowing
         expr: increase(worker_messages_total{result="poison"}[10m]) > 0
-        for: 0m
+        for: 2m
         labels: {severity: warning}
         annotations: {summary: "Poison messages hit DLQ in last 10m"}
       - alert: DlqNonEmpty
         expr: increase(worker_messages_total{result="dlq"}[10m]) > 0
-        for: 0m
+        for: 2m
         labels: {severity: critical}
         annotations: {summary: "Messages exhausted retries to DLQ"}
       - alert: OldestPendingTooOld
@@ -32,8 +32,13 @@ groups:
         labels: {severity: critical}
         annotations: {summary: "Oldest PENDING transfer older than 5m — worker/provider stuck"}
       # Meta-monitoring: silence != healthy. If metrics stop flowing, fire.
-      - alert: MetricsStale
+      - alert: MetricsStaleApi
         expr: absent(up{job="api"} == 1)
         for: 5m
         labels: {severity: critical}
         annotations: {summary: "No api up metric — exporter dead or Prometheus blind"}
+      - alert: MetricsStaleWorker
+        expr: absent(up{job="worker"} == 1)
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "No worker up metric — exporter dead or Prometheus blind"}

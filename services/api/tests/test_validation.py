@@ -5,7 +5,11 @@ from app.validation import InvalidTransfer, parse_transfer, to_minor
 
 
 def test_valid_transfer():
-    assert parse_transfer({"amount": "100.50", "currency": "RUB", "recipient": " TH1 "}) == (Decimal("100.50"), "RUB", "TH1")
+    assert parse_transfer({"amount": "100.50", "currency": "RUB", "recipient": " TH1 "}) == (
+        Decimal("100.50"),
+        "RUB",
+        "TH1",
+    )
 
 
 @pytest.mark.parametrize(

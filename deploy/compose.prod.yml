@@ -1,10 +1,6 @@
 # Prod overrides: only deltas vs base.
+# Prod ничего наружу не публикует кроме proxy (${API_PORT}:80).
+# 15672/9090 — только в stage на 127.0.0.1, здесь намеренно пусто.
 services:
   api:
     ports: []
-  rabbitmq:
-    ports:
-      - "127.0.0.1:15672:15672"
-  prometheus:
-    ports:
-      - "127.0.0.1:9090:9090"

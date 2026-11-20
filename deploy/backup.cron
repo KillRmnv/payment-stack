@@ -1,0 +1,6 @@
+# Cron-пример для хоста: бэкап payments каждый час.
+# Установка (на хосте, не в контейнере):
+#   crontab -e
+#   0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup >> /var/log/payment-backup.log 2>&1
+# KEEP_DAYS переопределяется через env: KEEP_DAYS=30 make backup
+0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup >> /var/log/payment-backup.log 2>&1

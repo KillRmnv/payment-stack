@@ -16,14 +16,16 @@ jobs:
           cache: pip
       - run: pip install "ruff==0.17.6" pytest -r services/api/requirements.txt -r services/worker/requirements.txt
       - name: Lint
-        run: ruff check services mock-provider
+        run: |
+          ruff check services mock-provider
+          ruff format --check services mock-provider
       - name: Compose config (stage+prod)
         run: |
           touch deploy/runtime.env
           docker compose --env-file deploy/env/stage.env -f deploy/docker-compose.yml -f deploy/compose.stage.yml config >/dev/null
           docker compose --env-file deploy/env/prod.env -f deploy/docker-compose.yml -f deploy/compose.prod.yml config >/dev/null
       - name: No destructive commands
-        run: '! grep -rnE "compose +down +-v|compose +down +.*--volumes" deploy/*.sh scripts/*.sh'
+        run: '! grep -rnE "compose +down +-v|compose +down +.*--volumes" deploy scripts'
       - name: Test api
         run: PYTHONPATH=services/api pytest services/api/tests -q
       - name: Test worker

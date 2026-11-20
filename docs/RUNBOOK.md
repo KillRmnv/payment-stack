@@ -5,12 +5,16 @@
 В prod debug-порты (15672/9090) не публикуются; в stage — только на `127.0.0.1`.
 
 ## Smoke: хост vs сеть
-Хост может не доставать до published-портов (VPN/файрвол режет host→bridge). `deploy.sh` сам выбирает: доступен `localhost:${API_PORT}/health` → `smoke.sh`, иначе → `scripts/smoke-net.sh` (тот же сценарий POST→COMPLETED, но трафик внутри compose-сети через `reverse-proxy`). Вручную: `SMOKE_BASE=http://reverse-proxy ./scripts/smoke.sh` не выйдет (curl с хоста) — используй `smoke-net.sh`. Проверка учениями — только in-network.
+Хост может не доставать до published-портов (VPN/файрвол режет host→bridge). `deploy.sh` и `rollback.sh` сами выбирают: доступен `localhost:${API_PORT}/health` → `smoke.sh`, иначе → `scripts/smoke-net.sh` (тот же сценарий POST→COMPLETED, но трафик внутри compose-сети через `reverse-proxy`). Вручную: `SMOKE_BASE=http://reverse-proxy ./scripts/smoke.sh` не выйдет (curl с хоста) — используй `smoke-net.sh`. Проверка учениями — только in-network. `status.sh` тоже умеет fallback (host → exec через worker).
 
-## Смена паролей БД/очереди
-Пароли живут в двух местах: Vault (эфемерный dev) + pgdata/rabbitmq-volume (постоянные). `seed --force` со свежими паролями на СУЩЕСТВУЮЩЕМ pgdata = `FATAL password authentication failed` (deploy падает на `db-auth-check` с понятной подсказкой, а не на smoke). Процедуры:
-- плановая смена: `seed --force` новыми → `render --strict` → `down -v` (ПОТЕРЯ ДАННЫХ) → `deploy`;
-- без потери данных: `ALTER USER payments PASSWORD '...'` в живом db + `ALTER USER` для rabbitmq через `rabbitmqctl change_password` + `seed --force` теми же значениями → `deploy` без `down -v`.
+## Смена паролей БД/очереди (без потери данных, без `down -v`)
+Пароли живут в двух местах: Vault (эфемерный dev) + pgdata/rabbitmq-volume (постоянные). `seed --force` со свежими паролями на СУЩЕСТВУЮЩЕМ pgdata = `FATAL password authentication failed` (deploy падает на `db-auth-check` с понятной подсказкой, а не на smoke). Основная процедура — `deploy/vault/rotate.sh` (ALTER в живой БД + `rabbitmqctl change_password` + `seed --force` теми же значениями):
+```
+export DB_PASSWORD=... RABBITMQ_PASSWORD=... PROVIDER_API_KEY=...
+./deploy/vault/rotate.sh stage
+make deploy ENV=stage
+```
+`down -v` — только последний шанс с ПОТЕРЕЙ ДАННЫХ, запрещен `make no-destructive` и CI-чеком.
 
 ## Откат
 `make rollback ENV=stage VERSION=<prev>` (берется из `.deploy-state-stage`, игнор в `.gitignore`). Схема НЕ откатывается: если миграция уже ушла, старый код должен быть совместим, иначе чини forward-миграцией `004_...`. Автооткат в `deploy.sh` откатывает только `api worker` — сломанная миграция автооткатом не чинится.
@@ -39,7 +43,7 @@ make migrate ENV=<env> && make deploy ENV=<env>
 `make migrate` без готового `runtime.env` упадет — сначала `render-env`.
 
 ## Бэкап/восстановление
-`make backup` → `backups/payments-*.sql.gz + .sha256`, retention `KEEP_DAYS=14`. `make restore FILE=...` сверяет sha256, восстанавливает во временную БД и считает `transfers/pending + schema_migrations`. Прод-режим: cron `0 * * * * make backup` (cron-файла в репо нет — настраивается на хосте).
+`make backup` → `backups/payments-*.sql.gz + .sha256`, retention `KEEP_DAYS=14`. Проверка: `make restore FILE=... ARGS="--verify-only"` сверяет sha256, восстанавливает во временную БД и считает `transfers/pending + schema_migrations`. Прод-восстановление: `make restore FILE=... ARGS="--apply stage|prod"` — стопает api/worker, заливает дамп в live `payments`, гоняет migrator, поднимает api/worker + smoke. Прод-режим: `deploy/backup.cron` (`0 * * * * make backup`) — ставить на хосте через `crontab -e`.
 
 ## Учения (защита)
-Ломают provider (`fail-mode`), убивают db/rabbit, шлют poison JSON, трут секрет. Смотри `./scripts/status.sh [stage|prod]` + Prometheus `/-/healthy` + `/api/v1/alerts` (Alertmanager не подключен — доставка алертов не настроена, см. LIMITS). Алерты: `ApiDown/WorkerDown 2m`, `DlqNonEmpty`, `MetricsStale: absent(up{job="api"}==1) 5m`.
+Ломают provider (`fail-mode`), убивают db/rabbit, шлют poison JSON, трут секрет. Смотри `./scripts/status.sh [stage|prod]` + Prometheus `/-/healthy` + `/api/v1/alerts` (Alertmanager не подключен — доставка алертов не настроена, см. LIMITS). Алерты: `ApiDown/WorkerDown 2m`, `DlqNonEmpty/PoisonQueueGrowing 2m`, `MetricsStaleApi/MetricsStaleWorker: absent(up{job}==1) 5m`.

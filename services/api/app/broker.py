@@ -7,7 +7,9 @@ QUEUE = "transfers"
 
 def _params(settings):
     credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password)
-    return pika.ConnectionParameters(host=settings.rabbitmq_host, credentials=credentials, socket_timeout=3)
+    return pika.ConnectionParameters(
+        host=settings.rabbitmq_host, credentials=credentials, socket_timeout=3
+    )
 
 
 def publish(settings, message):
