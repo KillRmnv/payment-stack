@@ -3,6 +3,11 @@
 Machine: Linux + Docker 29.10.0 + Compose v5.8.0, Python 3.12, commit `64d1999`, `2026-11-20T19:40:42Z`.
 Full GitHub Actions: `.github/workflows/ci.yml` (lint/test/compose stage+prod) + `cd.yml` (build 3 images GHCR :sha + Trivy image scan + push).
 
+Repo: `https://github.com/KillRmnv/payment-stack` (private). Runs (доказательство вместо `act`):
+- `ci` #44814476855 ✅ 20s — lint/test/compose (после пина `ruff==0.17.6`)
+- `cd` #44814476857 ✅ 1m19s — build 3 образов `:ef4fc31`, Trivy HIGH/CRITICAL fixable-only, push в `ghcr.io/killrmnv/*` (digest `sha256:5b22da...`)
+По пути поймано и починено вживую: ruff-strict (BLE/S110/I001, 9 ошибок), `trivy-action@0.24.0` не резолвится (пин SHA `a9c7b0f0` = v0.36.0), uppercase owner для GHCR, `docker images` с 3 аргументами, реальные CVE (starlette 0.37.2 → bump до 1.10.0 + uvicorn/pika/psycopg/requests/prometheus-client).
+
 ## pytest api (8 passed)
 ```
 ........                                                           [100%]
