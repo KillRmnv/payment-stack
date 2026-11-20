@@ -5,7 +5,7 @@ COMPOSE = docker compose --env-file env/$(ENV).env -f docker-compose.yml -f comp
 .PHONY: up down deploy migrate smoke rollback backup restore lint test build scan ci config-check no-destructive
 
 config-check:
-	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml config >/dev/null
+	cd deploy && test -f runtime.env || touch runtime.env && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml config >/dev/null
 
 no-destructive:
 	! grep -rnE "compose +down +-v|compose +down +.*--volumes" deploy/*.sh scripts/*.sh || (echo "destructive command found!" && exit 1)
@@ -46,7 +46,7 @@ ci: lint test build
 	@echo "local CI OK"
 
 up:
-	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml up -d --wait
+	cd deploy && test -f runtime.env || touch runtime.env && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml up -d --wait
 
 down:
-	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml down --remove-orphans
+	cd deploy && test -f runtime.env || touch runtime.env && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml down --remove-orphans
