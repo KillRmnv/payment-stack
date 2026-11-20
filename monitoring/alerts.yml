@@ -33,7 +33,7 @@ groups:
         annotations: {summary: "Oldest PENDING transfer older than 5m — worker/provider stuck"}
       # Meta-monitoring: silence != healthy. If metrics stop flowing, fire.
       - alert: MetricsStale
-        expr: absent(api_requests_total) == 1
+        expr: absent(up{job="api"} == 1)
         for: 5m
         labels: {severity: critical}
-        annotations: {summary: "No api_requests_total — meta: exporter dead or Prometheus blind"}
+        annotations: {summary: "No api up metric — exporter dead or Prometheus blind"}

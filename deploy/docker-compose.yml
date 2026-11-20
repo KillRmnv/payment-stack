@@ -42,8 +42,7 @@ services:
       RABBITMQ_DEFAULT_USER: payments
     volumes:
       - rabbitmq:/var/lib/rabbitmq
-    ports:
-      - "15672:15672"
+    # NOTE: management UI (15672) НЕ публикуем в base — только stage-overlay на 127.0.0.1.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -166,8 +165,7 @@ services:
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
-    ports:
-      - "9090:9090"
+    # NOTE: 9090 НЕ публикуем в base. Для отладки — stage-overlay на 127.0.0.1:9090.
     restart: unless-stopped
 
 volumes:

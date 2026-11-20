@@ -1,4 +1,11 @@
-# Stage overrides: only deltas vs base.
+# Stage overrides: только дельты vs base.
+# Debug-порты ТОЛЬКО на loopback, в base ничего наружу кроме proxy.
 services:
   api:
     ports: []
+  rabbitmq:
+    ports:
+      - "127.0.0.1:15672:15672"
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"

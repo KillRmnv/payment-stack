@@ -64,27 +64,30 @@ SELECT = "SELECT id, amount_minor, currency, recipient, status, provider_referen
 async def create_transfer(request):
     start = time.time()
     try:
-        amount, currency, recipient = parse_transfer(await request.json())
-    except (InvalidTransfer, ValueError) as exc:
-        return count(request, JSONResponse({"error": str(exc)}, status_code=400))
-    transfer_id = uuid.uuid4()
-    client_ip = request.client.host if request.client else None
-    request_id = request.headers.get("x-request-id", str(transfer_id))
-    try:
-        with psycopg.connect(settings.dsn) as conn:
-            conn.execute(
-                "INSERT INTO transfers (id, amount_minor, currency, recipient, status, client_ip) VALUES (%s, %s, %s, %s, %s, %s)",
-                (transfer_id, to_minor(amount), currency, recipient, "PENDING", client_ip),
-            )
-            row = conn.execute(SELECT, (transfer_id,)).fetchone()
-        broker.publish(settings, {"transfer_id": str(transfer_id)})
-    except Exception:
-        log.exception("create_transfer failed request_id=%s", request_id)
-        return count(request, JSONResponse({"error": "internal"}, status_code=500))
-    LATENCY.labels("POST", "transfers").observe(time.time() - start)
-    log.info("transfer created id=%s request_id=%s", transfer_id, request_id)
-    resp = JSONResponse(row_to_json(row), status_code=202, headers={"X-Request-Id": request_id})
-    return count(request, resp)
+        try:
+            amount, currency, recipient = parse_transfer(await request.json())
+        except (InvalidTransfer, ValueError) as exc:
+            return count(request, JSONResponse({"error": str(exc)}, status_code=400))
+        transfer_id = uuid.uuid4()
+        client_ip = request.client.host if request.client else None
+        request_id = request.headers.get("x-request-id", str(transfer_id))
+        try:
+            with psycopg.connect(settings.dsn) as conn:
+                conn.execute(
+                    "INSERT INTO transfers (id, amount_minor, currency, recipient, status, client_ip) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (transfer_id, to_minor(amount), currency, recipient, "PENDING", client_ip),
+                )
+                row = conn.execute(SELECT, (transfer_id,)).fetchone()
+            broker.publish(settings, {"transfer_id": str(transfer_id)})
+        except Exception:
+            log.exception("create_transfer failed request_id=%s", request_id)
+            return count(request, JSONResponse({"error": "internal"}, status_code=500))
+        log.info("transfer created id=%s request_id=%s", transfer_id, request_id)
+        resp = JSONResponse(row_to_json(row), status_code=202, headers={"X-Request-Id": request_id})
+        return count(request, resp)
+    finally:
+        # Latency на всех исходах (2xx/4xx/5xx), иначе p99 занижен.
+        LATENCY.labels("POST", "transfers").observe(time.time() - start)
 
 
 async def get_transfer(request):
@@ -106,7 +109,13 @@ async def metrics(request):
             PENDING.set(prow[0] or 0)
             OLDEST_PENDING.set(float(prow[1] or 0))
     except Exception:
-        pass
+        # БД недоступна: не отдаем stale значения — сбрасываем в NaN,
+        # иначе OldestPendingTooOld зависнет на последнем значении.
+        try:
+            PENDING.set(float("nan"))
+            OLDEST_PENDING.set(float("nan"))
+        except Exception:
+            pass
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

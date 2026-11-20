@@ -1,16 +1,17 @@
 ENV ?= stage
 APP_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+COMPOSE = docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml
 
 .PHONY: up down deploy migrate smoke rollback backup restore lint test build scan ci config-check no-destructive
 
 config-check:
-	cd deploy && docker compose --env-file env/$(ENV).env config >/dev/null
+	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml config >/dev/null
 
 no-destructive:
 	! grep -rnE "compose +down +-v|compose +down +.*--volumes" deploy/*.sh scripts/*.sh || (echo "destructive command found!" && exit 1)
 
 migrate:
-	cd deploy && APP_VERSION=$(APP_VERSION) docker compose --env-file env/$(ENV).env --profile tools run --rm migrator
+	cd deploy && APP_VERSION=$(APP_VERSION) docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml --profile tools run --rm migrator
 
 deploy: no-destructive
 	cd deploy && ENV=$(ENV) APP_VERSION=$(APP_VERSION) ./deploy.sh $(ENV)
@@ -45,7 +46,7 @@ ci: lint test build
 	@echo "local CI OK"
 
 up:
-	cd deploy && docker compose --env-file env/$(ENV).env up -d --wait
+	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml up -d --wait
 
 down:
-	cd deploy && docker compose --env-file env/$(ENV).env down --remove-orphans
+	cd deploy && docker compose --env-file env/$(ENV).env -f docker-compose.yml -f compose.$(ENV).yml down --remove-orphans

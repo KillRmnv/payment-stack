@@ -2,7 +2,9 @@
 services:
   api:
     ports: []
-  db:
-    restart: unless-stopped
   rabbitmq:
-    restart: unless-stopped
+    ports:
+      - "127.0.0.1:15672:15672"
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"

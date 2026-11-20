@@ -15,7 +15,9 @@ scrape_configs:
 rule_files:
   - alerts.yml
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
+# Alertmanager не настроен (см. LIMITS.md): алерты видны только в Prometheus UI /api/v1/alerts.
+# Чтобы включить доставку, раскомментируйте и укажите адрес Alertmanager:
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]

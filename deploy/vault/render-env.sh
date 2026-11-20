@@ -2,6 +2,7 @@
 # Render runtime.env from Vault. Fail-fast: missing secret = hard error.
 set -euo pipefail
 ENV="${1:?usage: render-env.sh <env> [--strict]}"
+STRICT="${2:-}"
 cd "$(dirname "$0")/.."
 
 get() {
@@ -20,6 +21,20 @@ if [ "${#missing[@]}" -ne 0 ]; then
   echo "FATAL: missing secrets in Vault: ${missing[*]}" >&2
   echo "HINT: export DB_PASSWORD/RABBITMQ_PASSWORD/PROVIDER_API_KEY and run ./vault/seed.sh $ENV" >&2
   exit 1
+fi
+
+# --strict: отказаться от слабых/плейсхолдерных значений, которые могли попасть при ручном seed.
+if [ "$STRICT" = "--strict" ]; then
+  weak=()
+  for v in "$DB_PASSWORD_VAULT" "$MQ_PASSWORD_VAULT" "$PROVIDER_KEY_VAULT"; do
+    if [ "${#v}" -lt 12 ] || [[ "$v" == change-me* || "$v" == test-* || "$v" == dev-only* ]]; then
+      weak+=("len=${#v}")
+    fi
+  done
+  if [ "${#weak[@]}" -ne 0 ]; then
+    echo "FATAL: --strict: weak placeholder secret detected (${#weak[@]}/3). Rotate via seed.sh --force." >&2
+    exit 1
+  fi
 fi
 
 cat > runtime.env <<EOT

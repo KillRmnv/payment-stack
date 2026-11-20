@@ -3,9 +3,12 @@
 set -euo pipefail
 FILE="${1:?usage: restore.sh <dump.sql.gz> [--verify-only]}"
 cd "$(dirname "$0")"
+[ -f "$FILE" ] || { echo "dump not found: $FILE" >&2; exit 1; }
+if [ -f "$FILE.sha256" ]; then sha256sum -c "$FILE.sha256" || exit 1; fi
 TMPDB="restore_verify_$(date +%s)"
 gunzip -c "$FILE" | docker compose exec -T db psql -U payments -d postgres -c "CREATE DATABASE $TMPDB;" >/dev/null
 trap "docker compose exec -T db psql -U payments -d postgres -c 'DROP DATABASE $TMPDB;' >/dev/null" EXIT
 gunzip -c "$FILE" | docker compose exec -T db psql -U payments -d "$TMPDB" >/dev/null
-docker compose exec -T db psql -U payments -d "$TMPDB" -c "SELECT count(*) FROM transfers;"
+docker compose exec -T db psql -U payments -d "$TMPDB" -c "SELECT count(*) AS transfers, count(*) FILTER (WHERE status='PENDING') AS pending FROM transfers;"
+docker compose exec -T db psql -U payments -d "$TMPDB" -c "SELECT count(*) FROM schema_migrations;"
 echo "restore verified into $TMPDB (dropped on exit)"

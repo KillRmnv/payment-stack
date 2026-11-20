@@ -5,7 +5,7 @@ set -euo pipefail
 
 ENV="${1:-stage}"
 cd "$(dirname "$0")"
-COMPOSE="docker compose --env-file env/$ENV.env"
+COMPOSE="docker compose --env-file env/$ENV.env -f docker-compose.yml -f compose.$ENV.yml"
 STATE_FILE="../.deploy-state-$ENV"
 
 if [ ! -f "env/$ENV.env" ]; then echo "unknown ENV=$ENV" >&2; exit 1; fi
@@ -18,9 +18,10 @@ echo "deploy ENV=$ENV APP_VERSION=$APP_VERSION"
 touch runtime.env
 $COMPOSE up -d --wait vault
 ./vault/seed.sh "$ENV"
-./vault/render-env.sh "$ENV"
+./vault/render-env.sh "$ENV" --strict
 
 echo "migrate..."
+$COMPOSE build api worker mock-provider
 $COMPOSE --profile tools run --rm migrator
 
 PREV="$(cat "$STATE_FILE" 2>/dev/null || true)"

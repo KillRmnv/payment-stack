@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV="${1:?usage: seed.sh <env>}"
+ENV="${1:?usage: seed.sh <env> [--force]}"
+FORCE="${2:-}"
 cd "$(dirname "$0")/.."
 
-if docker compose exec -T vault vault kv get "secret/payment-stack/$ENV" >/dev/null 2>&1; then
+if [ "$FORCE" != "--force" ] && docker compose exec -T vault vault kv get "secret/payment-stack/$ENV" >/dev/null 2>&1; then
+  echo "secret/payment-stack/$ENV exists, skip (use --force to rotate)" >&2
   exit 0
 fi
 

@@ -6,5 +6,6 @@ __pycache__/
 deploy/runtime.env
 deploy/.env
 backups/
+.deploy-state-*
 .deploy-state
 *.log
