@@ -31,7 +31,7 @@ Prod: `make deploy ENV=prod` (порт 8081, проверка `curl http://local
 - `./scripts/status.sh [stage|prod]` — статусы, health (host + in-network fallback), ключевые метрики
 - `./scripts/package.sh [out.zip]` — сборка ZIP для сдачи без секретов (`runtime.env`/токены/`backups` исключаются)
 
-Секреты: источник — Vault `secret/payment-stack/<env>`. Нет секрета → `render-env.sh --strict` падает с `FATAL`, сервисы не стартуют. Ротация: `seed.sh <env> --force`. `deploy/runtime.env` не коммитить (есть только `runtime.env.example`).
+Секреты: источник — Vault `secret/payment-stack/<env>`. Нет секрета → `render-env.sh --strict` падает с `FATAL`, сервисы не стартуют. Vault-токен обязателен явно (`README` export или `deploy.sh` генерирует в `.vault-token-<env>`); дефолта `dev-only-root-token` больше нет — compose падает с понятным FATAL. Ротация: `seed.sh <env> --force`. `deploy/runtime.env` не коммитить (есть только `runtime.env.example`).
 Компоуз: `docker-compose.yml + compose.<env>.yml` (stage открывает 15672/9090 только на 127.0.0.1, prod — ничего лишнего).
 Миграции: `migrator` one-shot до раскатки, advisory lock, откат схемы не поддерживается (автооткат чинит только код).
 CI proof: `docs/ci-proof.md`.

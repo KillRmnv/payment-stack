@@ -22,10 +22,16 @@ groups:
         labels: {severity: warning}
         annotations: {summary: "Poison messages hit DLQ in last 10m"}
       - alert: DlqNonEmpty
-        expr: increase(worker_messages_total{result="dlq"}[10m]) > 0
+        expr: increase(worker_messages_total{result=~"dlq|poison"}[10m]) > 0
         for: 2m
         labels: {severity: critical}
-        annotations: {summary: "Messages exhausted retries to DLQ"}
+        annotations: {summary: "Messages exhausted retries or poison hit DLQ in last 10m"}
+      # Meta-monitoring: silence != healthy. If metrics stop flowing, fire.
+      - alert: MetricsStaleBusiness
+        expr: absent(api_oldest_pending_seconds) or absent(api_pending_transfers)
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Business gauges missing — api /metrics down or DB down"}
       - alert: OldestPendingTooOld
         expr: api_oldest_pending_seconds > 300
         for: 5m

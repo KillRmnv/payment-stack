@@ -31,7 +31,7 @@ make deploy ENV=stage
 `--strict` отказывается от плейсхолдеров короче 12 символов / `change-me*` / `test-*`.
 
 ## Очередь растет (PENDING стареет)
-1. `curl localhost:8080/metrics | grep -E "pending|worker_messages"` 2. `docker compose exec -T rabbitmq rabbitmqctl list_queues` (UI 15672 только в stage на 127.0.0.1) 3. `docker compose logs worker` (retry/poison/dlq, `request_id=transfer_id`) 4. Проверь `mock-provider failing` и алерты `PoisonQueueGrowing(old)/OldestPendingTooOld(>300s 5m)`. Републикация с backoff до 5с, `LookupError` (нет transfer) идет сразу в DLQ как poison, не в retry.
+1. `curl localhost:8080/metrics | grep -E "pending|worker_messages"` 2. `docker compose exec -T rabbitmq rabbitmqctl list_queues` (UI 15672 только в stage на 127.0.0.1) 3. `docker compose logs worker` (retry/poison/dlq, `request_id=transfer_id`) 4. Проверь `mock-provider failing` (с ключом: `curl -X POST -H 'X-Admin-Key: $PROVIDER_API_KEY' .../admin/fail-mode`) и алерты `PoisonQueueGrowing(old)/DlqNonEmpty(poison|dlq)/OldestPendingTooOld(>300s 5m)/MetricsStaleBusiness`. Републикация без sleep (prefetch=1), `LookupError` (нет transfer) идет сразу в DLQ как poison, не в retry.
 
 ## БД недоступна
 `api /health` → 503 `{"db":"down"}`, smoke падает → автооткат кода (БД та же). Чини:
@@ -46,4 +46,4 @@ make migrate ENV=<env> && make deploy ENV=<env>
 `make backup` → `backups/payments-*.sql.gz + .sha256`, retention `KEEP_DAYS=14`. Проверка: `make restore FILE=... ARGS="--verify-only"` сверяет sha256, восстанавливает во временную БД и считает `transfers/pending + schema_migrations`. Прод-восстановление: `make restore FILE=... ARGS="--apply stage|prod"` — стопает api/worker, заливает дамп в live `payments`, гоняет migrator, поднимает api/worker + smoke. Прод-режим: `deploy/backup.cron` (`0 * * * * make backup`) — ставить на хосте через `crontab -e`.
 
 ## Учения (защита)
-Ломают provider (`fail-mode`), убивают db/rabbit, шлют poison JSON, трут секрет. Смотри `./scripts/status.sh [stage|prod]` + Prometheus `/-/healthy` + `/api/v1/alerts` (Alertmanager не подключен — доставка алертов не настроена, см. LIMITS). Алерты: `ApiDown/WorkerDown 2m`, `DlqNonEmpty/PoisonQueueGrowing 2m`, `MetricsStaleApi/MetricsStaleWorker: absent(up{job}==1) 5m`.
+Ломают provider (`fail-mode` — с ключом `X-Admin-Key: $PROVIDER_API_KEY`), убивают db/rabbit, шлют poison JSON, трут секрет. Смотри `./scripts/status.sh [stage|prod]` + Prometheus `/-/healthy` + `/api/v1/alerts` + Alertmanager `/-/healthy` (receiver по умолчанию blackhole — доставку настраивать в `monitoring/alertmanager.yml`). Алерты: `ApiDown/WorkerDown 2m`, `DlqNonEmpty(poison|dlq)/PoisonQueueGrowing 2m`, `MetricsStaleApi/MetricsStaleWorker/MetricsStaleBusiness: absent 5m`.

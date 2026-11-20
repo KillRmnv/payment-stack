@@ -35,6 +35,12 @@ async def create_payout(request):
 
 
 async def set_failing(request):
+    # Учения/защита: без ключа любой кладет провайдера. Ключ = PROVIDER_API_KEY.
+    if (
+        request.headers.get("X-Api-Key") != api_key()
+        and request.headers.get("X-Admin-Key") != api_key()
+    ):
+        return JSONResponse({"code": "UNAUTHORIZED"}, status_code=401)
     body = await request.json()
     state["failing"] = bool(body.get("enabled"))
     return JSONResponse({"failing": state["failing"]})

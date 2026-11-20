@@ -75,8 +75,13 @@ if run_smoke; then
 else
   echo "smoke FAILED, auto-rollback (code only, schema stays)..." >&2
   if [ -n "$PREV" ] && [ "$PREV" != "$APP_VERSION" ]; then
-    APP_VERSION="$PREV" $COMPOSE up -d --wait api worker
-    run_smoke
+    if docker image inspect "northwind/payment-api:$PREV" >/dev/null 2>&1 && docker image inspect "northwind/payment-worker:$PREV" >/dev/null 2>&1; then
+      APP_VERSION="$PREV" $COMPOSE up -d --wait api worker
+      run_smoke
+    else
+      echo "FATAL: PREV image northwind/payment-{api,worker}:$PREV not found locally, cannot auto-rollback. Old code tag was pruned." >&2
+      exit 1
+    fi
   fi
   exit 1
 fi

@@ -1,9 +1,8 @@
 import logging
-import time
 
 import pika
 import psycopg
-from prometheus_client import Counter, Gauge, start_http_server
+from prometheus_client import Counter, start_http_server
 
 from .config import load_settings
 from .messages import PoisonMessage, parse_message
@@ -14,7 +13,7 @@ QUEUE = "transfers"
 DLQ = "transfers.dlq"
 MAX_RETRIES = 5
 MESSAGES = Counter("worker_messages_total", "Processed messages", ["result"])
-DLQ_DEPTH = Gauge("worker_dlq_depth", "DLQ depth (total published to DLQ)")
+DLQ_PUBLISHED = Counter("worker_dlq_published_total", "Total messages published to DLQ")
 
 
 def process(settings, body):
@@ -57,7 +56,7 @@ def publish_dlq(channel, body, reason):
         body=body,
         properties=pika.BasicProperties(delivery_mode=2, headers={"x-death-reason": reason}),
     )
-    DLQ_DEPTH.inc()
+    DLQ_PUBLISHED.inc()
 
 
 def main():
@@ -101,8 +100,9 @@ def main():
                 ch.basic_ack(method.delivery_tag)
             else:
                 MESSAGES.labels("retry").inc()
-                # Dampen hot-loop: линейный backoff перед републикацией.
-                time.sleep(min(retries + 1, 5))
+                # Без blocking sleep: републикация сразу, hot-loop гасится
+                # prefetch=1 + roundtrip через брокер. Блокирующий sleep
+                # останавливал весь consumer на секунды.
                 ch.basic_publish(
                     exchange="",
                     routing_key=QUEUE,

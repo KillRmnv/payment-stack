@@ -13,9 +13,11 @@ cd "$(dirname "$0")/.."
 
 echo "rotate passwords for $ENV (no data loss)..."
 # 1. Apply to live DB (needs current working password from runtime.env).
+# Безопасное квотирование через psql -v (конкатенация в SQL ломается на кавычках).
 set -a; [ -f runtime.env ] && . runtime.env; set +a
 docker compose exec -T db psql -U payments -d payments \
-  -c "ALTER USER payments PASSWORD '$DB_PASSWORD';"
+  -v newpw="$DB_PASSWORD" \
+  -c "ALTER USER payments PASSWORD :'newpw';"
 echo "db password rotated"
 
 # 2. Apply to live RabbitMQ.

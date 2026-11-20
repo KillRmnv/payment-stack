@@ -39,7 +39,12 @@ if [ "$MODE" = "--apply" ]; then
   APP_VERSION="${APP_VERSION:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}" \
     $COMPOSE --profile tools run --rm migrator
   $COMPOSE up -d --wait api worker
-  ../scripts/smoke-net.sh "$ENV" || ../scripts/smoke.sh "$ENV"
+  # Тот же fallback что в deploy.sh: host недоступен/VPN/нет curl -> in-network.
+  if [ -n "${SMOKE_NET:-}" ] || ! command -v curl >/dev/null 2>&1 || ! curl -fsS -m 5 "http://localhost:${API_PORT:-8080}/health" >/dev/null 2>&1; then
+    ../scripts/smoke-net.sh "$ENV"
+  else
+    ../scripts/smoke.sh "$ENV"
+  fi
   echo "restore --apply OK"
   exit 0
 fi

@@ -1,4 +1,3 @@
-import contextlib
 import logging
 import time
 import uuid
@@ -54,6 +53,7 @@ async def health(request):
 
 
 def row_to_json(row):
+    # client_ip хранится в БД, но наружу не отдаем (PII, без auth любой мог читать чужое).
     return {
         "id": str(row[0]),
         "amount": f"{row[1] / 100:.2f}",
@@ -61,11 +61,10 @@ def row_to_json(row):
         "recipient": row[3],
         "status": row[4],
         "provider_reference": row[5],
-        "client_ip": row[6],
     }
 
 
-SELECT = "SELECT id, amount_minor, currency, recipient, status, provider_reference, client_ip FROM transfers WHERE id = %s"
+SELECT = "SELECT id, amount_minor, currency, recipient, status, provider_reference FROM transfers WHERE id = %s"
 
 
 async def create_transfer(request):
@@ -98,15 +97,23 @@ async def create_transfer(request):
 
 
 async def get_transfer(request):
+    start = time.time()
     try:
-        transfer_id = uuid.UUID(request.path_params["transfer_id"])
-    except ValueError:
-        return count(request, JSONResponse({"error": "not found"}, status_code=404))
-    with psycopg.connect(settings.dsn) as conn:
-        row = conn.execute(SELECT, (transfer_id,)).fetchone()
-    if row is None:
-        return count(request, JSONResponse({"error": "not found"}, status_code=404))
-    return count(request, JSONResponse(row_to_json(row)))
+        try:
+            transfer_id = uuid.UUID(request.path_params["transfer_id"])
+        except ValueError:
+            return count(request, JSONResponse({"error": "not found"}, status_code=404))
+        try:
+            with psycopg.connect(settings.dsn) as conn:
+                row = conn.execute(SELECT, (transfer_id,)).fetchone()
+        except Exception:
+            log.exception("get_transfer db failed")
+            return count(request, JSONResponse({"error": "internal"}, status_code=500))
+        if row is None:
+            return count(request, JSONResponse({"error": "not found"}, status_code=404))
+        return count(request, JSONResponse(row_to_json(row)))
+    finally:
+        LATENCY.labels("GET", "transfers").observe(time.time() - start)
 
 
 async def metrics(request):
@@ -118,11 +125,10 @@ async def metrics(request):
             PENDING.set(prow[0] or 0)
             OLDEST_PENDING.set(float(prow[1] or 0))
     except Exception:  # noqa: BLE001 — /metrics must never 500 on DB outage
-        # БД недоступна: не отдаем stale значения — сбрасываем в NaN,
-        # иначе OldestPendingTooOld зависнет на последнем значении.
-        with contextlib.suppress(Exception):  # gauges best-effort, never raise
-            PENDING.set(float("nan"))
-            OLDEST_PENDING.set(float("nan"))
+        # БД недоступна: gauges НЕ трогаем (храним последнее значение),
+        # отсутствие свежих данных ловит алерт MetricsStaleBusiness.
+        # Раньше писали NaN — Prometheus дропал серию и OldestPendingTooOld молчал.
+        log.warning("metrics db down, keeping last gauge values")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

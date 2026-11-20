@@ -9,9 +9,9 @@
 - Reverse-proxy резолвит api через переменную + `resolver 127.0.0.11 valid=10s`: после пересоздания api IP меняется, статичный upstream давал бы вечный 502.
 - Vault dev-root токен стабилен на env (экспорт → `.vault-token-<env>` → генерация): смена токена пересоздает Vault и стирает in-memory секреты.
 - Два workflow: `ci.yml` (lint/test/compose stage+prod) на PR + `cd.yml` (build 3 образов GHCR SHA + Trivy image scan api/worker/mock-provider + push).
-- Worker: `PoisonMessage` и `LookupError`→DLQ сразу, retriable→retry x5 с backoff→DLQ, метки `processed/duplicate/poison/retry/dlq`, `DLQ_DEPTH.inc()` на каждой публикации в DLQ, `verify=<ca-bundle>` вместо `verify=False`, `request_id=transfer_id` в логах.
-- Health: `/health`+`/ready` проверяют DB+broker ping; метрики `pending/oldest_pending`, latency histogram на всех исходах (2xx/4xx/5xx); при недоступности БД gauges уходят в NaN, чтобы не отдавать stale.
-- Алерты с порогами: `down 2m` (не флэп), `poison/dlq 2m`, `p99>1s 5m`, `oldest_pending>300s 5m`, `MetricsStaleApi/MetricsStaleWorker absent(up{job}==1) 5m` (молчание ≠ ок). Alertmanager не подключен — алерты только в Prometheus UI.
+- Worker: `PoisonMessage` и `LookupError`→DLQ сразу, retriable→retry x5 с немедленной републикацией (без blocking sleep — sleep стопил весь consumer при prefetch=1) →DLQ, метки `processed/duplicate/poison/retry/dlq`, `DLQ_PUBLISHED.inc()` (`worker_dlq_published_total` Counter вместо врущего Gauge) на каждой публикации в DLQ, `verify=<ca-bundle>` вместо `verify=False`, `request_id=transfer_id` в логах.
+- Health: `/health`+`/ready` проверяют DB+broker ping; метрики `pending/oldest_pending`, latency histogram на POST+GET всех исходов (2xx/4xx/5xx); при недоступности БД gauges не трогаем (храним последнее, отсутствие свежих ловит `MetricsStaleBusiness`), чтобы не дропать серию в NaN.
+- Алерты с порогами: `down 2m` (не флэп), `poison/dlq 2m` (`DlqNonEmpty` смотрит `result=~"dlq|poison"`), `p99>1s 5m` (latency на POST+GET), `oldest_pending>300s 5m`, `MetricsStaleApi/MetricsStaleWorker absent(up{job}==1) 5m` + `MetricsStaleBusiness absent(gauges) 5m` (молчание ≠ ок). Alertmanager поднят в compose (`alertmanager:9093`, receiver blackhole по умолчанию).
 - Бэкап `payments` + sha256 + retention `KEEP_DAYS=14` (`deploy/backup.cron` на хосте), verify в temp DB + `--apply` в live DB с migrator+smoke (`transfers/pending + schema_migrations`).
 - Сдача без секретов: `scripts/package.sh` собирает ZIP с exclude `runtime.env/.vault-token-*/.deploy-state-*/backups/.git` + проверкой на утечку.
 
