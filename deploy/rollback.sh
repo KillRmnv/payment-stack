@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-set -e
-
-VERSION="${1:?usage: rollback.sh <version>}"
+# Manual rollback: code only, schema stays (forward-only migrations).
+set -euo pipefail
+VERSION="${1:?usage: rollback.sh <version> [env]}"
+ENV="${2:-stage}"
 cd "$(dirname "$0")"
-APP_VERSION="$VERSION" docker compose up -d --no-build --no-deps api worker
-docker compose restart reverse-proxy
+echo "WARNING: schema is NOT rolled back (forward-only). Code -> $VERSION" >&2
+APP_VERSION="$VERSION" docker compose --env-file "env/$ENV.env" up -d --wait api worker
+../scripts/smoke.sh "$ENV"

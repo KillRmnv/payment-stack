@@ -1,0 +1,39 @@
+groups:
+  - name: payment-stack
+    rules:
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "API not scraping — payments blind"}
+      - alert: WorkerDown
+        expr: up{job="worker"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Worker not scraping — payouts stall"}
+      - alert: ApiHighLatency
+        expr: histogram_quantile(0.99, rate(api_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "API p99 > 1s for 5m"}
+      - alert: PoisonQueueGrowing
+        expr: increase(worker_messages_total{result="poison"}[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations: {summary: "Poison messages hit DLQ in last 10m"}
+      - alert: DlqNonEmpty
+        expr: increase(worker_messages_total{result="dlq"}[10m]) > 0
+        for: 0m
+        labels: {severity: critical}
+        annotations: {summary: "Messages exhausted retries to DLQ"}
+      - alert: OldestPendingTooOld
+        expr: api_oldest_pending_seconds > 300
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Oldest PENDING transfer older than 5m — worker/provider stuck"}
+      # Meta-monitoring: silence != healthy. If metrics stop flowing, fire.
+      - alert: MetricsStale
+        expr: absent(api_requests_total) == 1
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "No api_requests_total — meta: exporter dead or Prometheus blind"}

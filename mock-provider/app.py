@@ -6,7 +6,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 state = {"failing": False, "payouts": {}}
-API_KEY = os.environ.get("PROVIDER_API_KEY", "")
+
+
+def api_key():
+    return os.environ.get("PROVIDER_API_KEY", "")
 
 
 async def health(request):
@@ -14,7 +17,7 @@ async def health(request):
 
 
 async def create_payout(request):
-    if not API_KEY or request.headers.get("X-Api-Key") != API_KEY:
+    if not api_key() or request.headers.get("X-Api-Key") != api_key():
         return JSONResponse({"code": "UNAUTHORIZED"}, status_code=401)
     if state["failing"]:
         return JSONResponse({"code": "INTERNAL_ERROR"}, status_code=503)

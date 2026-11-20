@@ -1,0 +1,4 @@
+# Stage overrides: only deltas vs base.
+services:
+  api:
+    ports: []

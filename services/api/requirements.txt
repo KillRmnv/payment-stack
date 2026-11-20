@@ -1,5 +1,5 @@
-starlette
-uvicorn
-psycopg
-pika
-prometheus-client
+starlette==0.37.2
+uvicorn==0.29.0
+psycopg[binary]==3.2.10
+pika==1.3.2
+prometheus-client==0.20.0

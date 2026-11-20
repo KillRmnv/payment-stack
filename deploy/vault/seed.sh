@@ -8,9 +8,12 @@ if docker compose exec -T vault vault kv get "secret/payment-stack/$ENV" >/dev/n
   exit 0
 fi
 
-. ./.env
+: "${DB_PASSWORD:?set DB_PASSWORD in host env (never commit it)}"
+: "${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in host env}"
+: "${PROVIDER_API_KEY:?set PROVIDER_API_KEY in host env}"
 
 docker compose exec -T vault vault kv put "secret/payment-stack/$ENV" \
   db_password="$DB_PASSWORD" \
   rabbitmq_password="$RABBITMQ_PASSWORD" \
   provider_api_key="$PROVIDER_API_KEY" >/dev/null
+echo "seeded secret/payment-stack/$ENV"

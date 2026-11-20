@@ -1,0 +1,1 @@
+{"title": "Payments in 10s", "panels": [{"title": "transfer 5xx / 2xx", "expr": "rate(api_requests_total[5m])"}, {"title": "pending count", "expr": "api_pending_transfers"}, {"title": "oldest pending (s)", "expr": "api_oldest_pending_seconds"}, {"title": "worker poison/dlq rate", "expr": "rate(worker_messages_total[5m])"}]}

@@ -1,4 +1,10 @@
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
 deploy/runtime.env
+deploy/.env
 backups/
+.deploy-state
+*.log

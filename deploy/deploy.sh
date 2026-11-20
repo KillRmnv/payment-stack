@@ -1,23 +1,40 @@
 #!/usr/bin/env bash
-set -e
+# Idempotent deploy: render secrets -> migrate -> up -> wait -> smoke.
+# NEVER runs `down -v` (destroys pgdata/rabbitmq volumes).
+set -euo pipefail
 
 ENV="${1:-stage}"
 cd "$(dirname "$0")"
-SERVICES="api worker mock-provider"
+COMPOSE="docker compose --env-file env/$ENV.env"
+STATE_FILE="../.deploy-state-$ENV"
+
+if [ ! -f "env/$ENV.env" ]; then echo "unknown ENV=$ENV" >&2; exit 1; fi
+set -a; . "env/$ENV.env"; set +a
+
+APP_VERSION="${APP_VERSION:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
+export APP_VERSION API_PORT LOG_LEVEL
+echo "deploy ENV=$ENV APP_VERSION=$APP_VERSION"
 
 touch runtime.env
-set -a
-. "env/$ENV.env"
-set +a
-
-docker compose down -v
-docker compose up -d --wait vault
+$COMPOSE up -d --wait vault
 ./vault/seed.sh "$ENV"
 ./vault/render-env.sh "$ENV"
-docker compose build $SERVICES
 
-docker compose up -d --remove-orphans
+echo "migrate..."
+$COMPOSE --profile tools run --rm migrator
 
-for service in $SERVICES; do
-  docker compose ps "$service"
-done
+PREV="$(cat "$STATE_FILE" 2>/dev/null || true)"
+$COMPOSE up -d --remove-orphans --wait
+
+if ../scripts/smoke.sh "$ENV"; then
+  echo "$APP_VERSION" > "$STATE_FILE"
+  echo "deploy OK $APP_VERSION"
+else
+  echo "smoke FAILED, auto-rollback..." >&2
+  if [ -n "$PREV" ] && [ "$PREV" != "$APP_VERSION" ]; then
+    APP_VERSION="$PREV" $COMPOSE up -d --wait api worker
+  fi
+  exit 1
+fi
+
+for s in api worker mock-provider; do $COMPOSE ps "$s"; done

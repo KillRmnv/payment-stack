@@ -5,10 +5,13 @@ import pika
 QUEUE = "transfers"
 
 
-def publish(settings, message):
+def _params(settings):
     credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password)
-    parameters = pika.ConnectionParameters(host=settings.rabbitmq_host, credentials=credentials, socket_timeout=3)
-    connection = pika.BlockingConnection(parameters)
+    return pika.ConnectionParameters(host=settings.rabbitmq_host, credentials=credentials, socket_timeout=3)
+
+
+def publish(settings, message):
+    connection = pika.BlockingConnection(_params(settings))
     try:
         channel = connection.channel()
         channel.queue_declare(queue=QUEUE, durable=True)
@@ -20,3 +23,12 @@ def publish(settings, message):
         )
     finally:
         connection.close()
+
+
+def ping(settings):
+    try:
+        connection = pika.BlockingConnection(_params(settings))
+        connection.close()
+        return True
+    except Exception:
+        return False

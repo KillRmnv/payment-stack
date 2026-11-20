@@ -1,0 +1,8 @@
+# Prod overrides: only deltas vs base.
+services:
+  api:
+    ports: []
+  db:
+    restart: unless-stopped
+  rabbitmq:
+    restart: unless-stopped
