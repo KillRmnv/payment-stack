@@ -7,5 +7,5 @@ deploy/runtime.env
 deploy/.env
 backups/
 .deploy-state-*
-.deploy-state
+.vault-token-*
 *.log

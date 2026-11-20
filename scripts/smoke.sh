@@ -7,7 +7,9 @@ PORT="8080"; [ "$ENV" = "prod" ] && PORT="8081"
 [ -n "${API_PORT:-}" ] || true
 # allow override via deploy env file
 if [ -f "deploy/env/$ENV.env" ]; then set -a; . "deploy/env/$ENV.env"; set +a; PORT="${API_PORT:-$PORT}"; fi
-BASE="http://localhost:$PORT"
+# SMOKE_BASE переопределяет точку входа: по умолчанию localhost (хост),
+# внутри docker-сети — http://reverse-proxy (обходит VPN/файрвол хоста).
+BASE="${SMOKE_BASE:-http://localhost:$PORT}"
 
 echo "smoke $ENV $BASE"
 ID="$(curl -fsS -X POST "$BASE/transfers" -H 'Content-Type: application/json' \

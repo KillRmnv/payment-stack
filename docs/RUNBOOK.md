@@ -1,8 +1,16 @@
 # RUNBOOK
 
 ## Деплой
-`export DB_PASSWORD RABBITMQ_PASSWORD PROVIDER_API_KEY VAULT_DEV_ROOT_TOKEN; make deploy ENV=stage` → жди `deploy OK`. Не используй `down -v` — сносит тома. Оверлей подключается автоматически: `docker-compose.yml + compose.<env>.yml` (см. `Makefile COMPOSE`, `deploy.sh COMPOSE`).
+`export DB_PASSWORD RABBITMQ_PASSWORD PROVIDER_API_KEY [VAULT_DEV_ROOT_TOKEN]; make deploy ENV=stage` → жди `deploy OK`. Токен Vault стабилен на env: заданный переиспользуется, иначе генерируется в gitignored `.vault-token-<env>` (не удаляй — смена токена пересоздает dev-Vault и стирает секреты). Не используй `down -v` — сносит тома. Оверлей подключается автоматически: `docker-compose.yml + compose.<env>.yml` (см. `Makefile COMPOSE`, `deploy.sh COMPOSE`).
 В prod debug-порты (15672/9090) не публикуются; в stage — только на `127.0.0.1`.
+
+## Smoke: хост vs сеть
+Хост может не доставать до published-портов (VPN/файрвол режет host→bridge). `deploy.sh` сам выбирает: доступен `localhost:${API_PORT}/health` → `smoke.sh`, иначе → `scripts/smoke-net.sh` (тот же сценарий POST→COMPLETED, но трафик внутри compose-сети через `reverse-proxy`). Вручную: `SMOKE_BASE=http://reverse-proxy ./scripts/smoke.sh` не выйдет (curl с хоста) — используй `smoke-net.sh`. Проверка учениями — только in-network.
+
+## Смена паролей БД/очереди
+Пароли живут в двух местах: Vault (эфемерный dev) + pgdata/rabbitmq-volume (постоянные). `seed --force` со свежими паролями на СУЩЕСТВУЮЩЕМ pgdata = `FATAL password authentication failed` (deploy падает на `db-auth-check` с понятной подсказкой, а не на smoke). Процедуры:
+- плановая смена: `seed --force` новыми → `render --strict` → `down -v` (ПОТЕРЯ ДАННЫХ) → `deploy`;
+- без потери данных: `ALTER USER payments PASSWORD '...'` в живом db + `ALTER USER` для rabbitmq через `rabbitmqctl change_password` + `seed --force` теми же значениями → `deploy` без `down -v`.
 
 ## Откат
 `make rollback ENV=stage VERSION=<prev>` (берется из `.deploy-state-stage`, игнор в `.gitignore`). Схема НЕ откатывается: если миграция уже ушла, старый код должен быть совместим, иначе чини forward-миграцией `004_...`. Автооткат в `deploy.sh` откатывает только `api worker` — сломанная миграция автооткатом не чинится.

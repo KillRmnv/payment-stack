@@ -21,7 +21,9 @@ Prod: `make deploy ENV=prod` (порт 8081). Требуется `curl`/`python3
 - `make rollback ENV=stage VERSION=<sha>` — откат кода (схема только вперед!)
 - `make backup / make restore FILE=...` — бэкап `payments` (sha256 + retention) + проверка восстановления
 - `make ci` — локальные lint+test+build; полный CI в `.github/workflows/ci.yml` + `cd.yml`
+- `./scripts/smoke.sh [stage|prod]` — статусы, health, ключевые метрики
 - `./scripts/status.sh [stage|prod]` — статусы, health, ключевые метрики
+- `./scripts/smoke-net.sh [stage|prod]` — тот же smoke изнутри сети (нужен при VPN на хосте)
 
 Секреты: источник — Vault `secret/payment-stack/<env>`. Нет секрета → `render-env.sh --strict` падает с `FATAL`, сервисы не стартуют. Ротация: `seed.sh <env> --force`. `deploy/runtime.env` не коммитить (есть только `runtime.env.example`).
 Компоуз: `docker-compose.yml + compose.<env>.yml` (stage открывает 15672/9090 только на 127.0.0.1, prod — ничего лишнего).
