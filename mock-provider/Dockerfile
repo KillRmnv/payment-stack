@@ -4,7 +4,7 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca56
 FROM ${PYTHON_IMAGE} AS builder
 WORKDIR /app
 COPY mock-provider/requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt && pip install --no-cache-dir --user cryptography==42.0.5
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 FROM ${PYTHON_IMAGE} AS runtime
 RUN useradd -u 10000 -m appuser && mkdir -p /certs && chown appuser:appuser /certs
