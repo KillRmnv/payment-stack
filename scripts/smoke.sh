@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Smoke: POST /transfers -> 202 -> poll GET until COMPLETED (max 60s).
+# Требует curl+python3 на хосте. Без них — ./smoke-net.sh (python внутри контейнера).
 set -euo pipefail
 ENV="${1:-stage}"
+command -v curl >/dev/null 2>&1 || { echo "FATAL: curl not found, use ./scripts/smoke-net.sh $ENV (in-network, no host curl needed)" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "FATAL: python3 not found, use ./scripts/smoke-net.sh $ENV" >&2; exit 1; }
 cd "$(dirname "$0")/.."
 PORT="8080"; [ "$ENV" = "prod" ] && PORT="8081"
 [ -n "${API_PORT:-}" ] || true

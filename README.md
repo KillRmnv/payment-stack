@@ -1,20 +1,25 @@
 # Payment Stack (prod-ready)
 
-## Быстрый старт с нуля (Docker + Compose v2 + Git + make + интернет)
+## Быстрый старт с нуля (Docker Compose v2 + Git + make + интернет)
 
 ```bash
-export DB_PASSWORD=$(openssl rand -hex 16)
-export RABBITMQ_PASSWORD=$(openssl rand -hex 16)
-export PROVIDER_API_KEY=$(openssl rand -hex 16)
-export VAULT_DEV_ROOT_TOKEN=$(openssl rand -hex 16)
+# Секреты в хост-env (в архив/ZIP не класть, в git не коммитить).
+# gen: openssl, fallback — python3 или /dev/urandom (openssl может отсутствовать на чистой машине).
+gen() { openssl rand -hex 16 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(16))' 2>/dev/null || head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+export DB_PASSWORD=$(gen)
+export RABBITMQ_PASSWORD=$(gen)
+export PROVIDER_API_KEY=$(gen)
+export VAULT_DEV_ROOT_TOKEN=$(gen)
 
 make deploy ENV=stage
-# deploy.sh уже делает smoke сам (host или in-network при VPN).
+# deploy.sh уже делает smoke сам (host или in-network при VPN/без curl).
 # Ручная проверка:
+# host: curl http://localhost:8080/health (нужен curl, иначе см. ниже)
+# изнутри сети без curl на хосте: ./scripts/smoke-net.sh stage
 curl http://localhost:8080/health
 ```
 
-Prod: `make deploy ENV=prod` (порт 8081, проверка `curl http://localhost:8081/health`). Требуется `curl`/`python3` для smoke.
+Prod: `make deploy ENV=prod` (порт 8081, проверка `curl http://localhost:8081/health`). Host-smoke требует `curl`+`python3`; без них deploy сам переключается на in-network `smoke-net.sh` (python внутри контейнера, на хосте не нужен).
 
 ## Команды
 

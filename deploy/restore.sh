@@ -32,6 +32,8 @@ if [ "$MODE" = "--apply" ]; then
   echo "api/worker will be stopped during restore." >&2
   $COMPOSE stop api worker
   # shellcheck disable=SC2094
+  # --clean: дамп поверх живой БД без DROP даст duplicate key. Чистим таблицы перед заливкой.
+  gunzip -c "$FILE" | $COMPOSE exec -T db psql -U payments -d payments -c "DROP TABLE IF EXISTS transfers, schema_migrations CASCADE;" >/dev/null
   gunzip -c "$FILE" | $COMPOSE exec -T db psql -U payments -d payments >/dev/null
   echo "dump applied, running migrations..."
   APP_VERSION="${APP_VERSION:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}" \

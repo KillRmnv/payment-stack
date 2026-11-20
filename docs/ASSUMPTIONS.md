@@ -7,4 +7,4 @@
 - Сеть по умолчанию bridge от compose; TLS на входе (443) не делаем — за proxy выше по уровню. Наружу из base — только proxy `${API_PORT}:80`; debug-порты только в stage на loopback.
 - `mock-provider` — stand-in внешнего провайдера; контракта `POST /payouts → {payout_id,status}` достаточно.
 - `seed.sh` без `--force` идемпотентен (не затирает ключ) — ротация только через `--force`; `--strict` в `render-env.sh` отбрасывает слабые плейсхолдеры.
-- Чистая машина = Docker Compose v2 + Git + make + интернет (по заданию) + `curl/python3` для smoke (зафиксировано в README).
+- Чистая машина = Docker Compose v2 + Git + make + интернет (по заданию). `curl`/`python3` на хосте опциональны: host-smoke их требует, без них `deploy.sh`/`rollback.sh` сами переключаются на in-network `smoke-net.sh` (python внутри контейнера). `openssl` тоже опционален: генерация секретов fallback `openssl → python3 → /dev/urandom`.
