@@ -12,7 +12,7 @@ vault:8200 -> seed/render (exec) -> runtime.env (POSTGRES_PASSWORD, RABBITMQ_DEF
 ```
 
 Поток деплоя: `render-env --strict → migrator (advisory lock) → up api/worker (compose.<env>.yml overlay) → wait healthy → smoke.sh → LAST_GOOD_VERSION`. Откат: только код, схема forward-only (автооткат не чинит сломанную миграцию).
-Наружу из base — только proxy; stage дополнительно `127.0.0.1:15672/9090`, prod — ничего лишнего (9093 alertmanager тоже не публикуется, как и 9090).
+Наружу из base — только proxy; stage дополнительно `127.0.0.1:15672/9090`, prod — ничего лишнего (9093 alertmanager тоже не публикуется, как и 9090). `/metrics` наружу через proxy не отдается (`404`), Prometheus скрапит `api:8000`/`worker:8001` по внутренней сети.
 
 Границы доверия: интернет→proxy (единственная точка входа); api/worker/db/rabbit — внутри compose-сети; секреты только из Vault→runtime.env (не в образе/логах, `runtime.env` не в git); provider — внешняя граница (API-key + Idempotency-Key + TLS verify).
 Не-цели: настоящий Vault HA, TLS на входе, external registry (GHCR по SHA собирается/пушится в cd, deploy по умолчанию локальный build).

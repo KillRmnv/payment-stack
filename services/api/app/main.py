@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -36,16 +37,32 @@ def count(request, response):
     return response
 
 
-async def health(request):
-    checks = {}
+def _db_ok():
     try:
-        with psycopg.connect(settings.dsn) as conn:
+        with psycopg.connect(settings.dsn, connect_timeout=2) as conn:
             conn.execute("SELECT 1")
-        checks["db"] = "up"
+        return True
     except Exception as exc:  # noqa: BLE001 — any DB error means "down", never 500
         log.warning("health db down: %s", exc)
-        checks["db"] = "down"
-    checks["broker"] = "up" if broker.ping(settings) else "down"
+        return False
+
+
+async def _check(fn, name):
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=2.5)
+    except TimeoutError:
+        log.warning("health %s timed out", name)
+        return False
+
+
+async def health(request):
+    # Каждый чек со своим таймаутом: падение DB не должно маскировать broker
+    # как "down". Раньше db 3s + broker 3s подряд висели 6s и curl отваливался.
+    db_ok, broker_ok = await asyncio.gather(
+        _check(_db_ok, "db"),
+        _check(lambda: broker.ping(settings), "broker"),
+    )
+    checks = {"db": "up" if db_ok else "down", "broker": "up" if broker_ok else "down"}
     ok = all(v == "up" for v in checks.values())
     body = {"status": "ok" if ok else "degraded", "version": settings.app_version, "checks": checks}
     resp = JSONResponse(body, status_code=200 if ok else 503)

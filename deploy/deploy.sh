@@ -7,28 +7,14 @@ ENV="${1:-stage}"
 cd "$(dirname "$0")"
 COMPOSE="docker compose --env-file env/$ENV.env -f docker-compose.yml -f compose.$ENV.yml"
 STATE_FILE="../.deploy-state-$ENV"
-TOKEN_FILE="../.vault-token-$ENV"
 
 if [ ! -f "env/$ENV.env" ]; then echo "unknown ENV=$ENV" >&2; exit 1; fi
 set -a; . "env/$ENV.env"; set +a
 
-# Vault dev-root token must be STABLE per env: changing it recreates the vault
-# container, wiping in-memory secrets (dev mode) and desyncing pgdata passwords.
-# Reuse exported value, else a gitignored local file, else generate+save it.
-# gen_secret: openssl, иначе python3, иначе /dev/urandom (чистая машина по ТЗ:
-# только Docker+Git+make, openssl может отсутствовать).
-gen_secret() { openssl rand -hex 16 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(16))' 2>/dev/null || head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
-if [ -z "${VAULT_DEV_ROOT_TOKEN:-}" ]; then
-  if [ -f "$TOKEN_FILE" ]; then
-    VAULT_DEV_ROOT_TOKEN="$(cat "$TOKEN_FILE")"
-  else
-    VAULT_DEV_ROOT_TOKEN="$(gen_secret)"
-    echo "$VAULT_DEV_ROOT_TOKEN" > "$TOKEN_FILE"
-    chmod 600 "$TOKEN_FILE"
-    echo "generated $TOKEN_FILE (gitignored, keep it: token change wipes dev Vault)" >&2
-  fi
-fi
-export VAULT_DEV_ROOT_TOKEN
+# Vault dev-root token стабилен на env: смена токена пересоздает Vault и
+# стирает in-memory секреты. env -> .vault-token-<env> -> generate.
+. ./lib/env.sh
+ensure_vault_token "$ENV"
 
 APP_VERSION="${APP_VERSION:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
 export APP_VERSION API_PORT LOG_LEVEL
@@ -45,6 +31,16 @@ $COMPOSE --profile tools run --rm migrator
 
 PREV="$(cat "$STATE_FILE" 2>/dev/null || true)"
 $COMPOSE up -d --remove-orphans --wait
+
+# nginx.conf/monitoring — bind-mount; `up` их не перечитывает. Graceful reload,
+# чтобы правки edge/алертов применялись при деплое (битый конфиг -> старый жив).
+if $COMPOSE exec -T reverse-proxy nginx -t >/dev/null 2>&1; then
+  $COMPOSE exec -T reverse-proxy nginx -s reload >/dev/null 2>&1 && echo "nginx reloaded"
+else
+  echo "WARN: nginx config invalid, keeping previous config" >&2
+fi
+$COMPOSE exec -T api python3 -c "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://prometheus:9090/-/reload', method='POST'), timeout=5)" >/dev/null 2>&1 \
+  && echo "prometheus rules reloaded" || echo "WARN: prometheus reload skipped"
 
 # Fail fast on pgdata/password desync (persistent volume vs fresh secrets):
 # if the DB data dir was initialized with other passwords, api auth fails and

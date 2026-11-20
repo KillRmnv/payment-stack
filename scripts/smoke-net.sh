@@ -6,6 +6,8 @@
 set -euo pipefail
 ENV="${1:-stage}"
 cd "$(dirname "$0")/../deploy"
+. ./lib/env.sh
+ensure_vault_token "$ENV"
 COMPOSE="docker compose --env-file env/$ENV.env -f docker-compose.yml -f compose.$ENV.yml"
 $COMPOSE exec -T worker python3 - http://reverse-proxy <<'EOF'
 import json

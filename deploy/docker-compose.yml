@@ -172,6 +172,8 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.53.0@sha256:075b1ba2c4ebb04bc3a6ab86c06ec8d8099f8fda1c96ef6d104d9bb1def1d8bc
+    # --web.enable-lifecycle: POST /-/reload после деплоя (alerts.yml — bind-mount).
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.enable-lifecycle"]
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro

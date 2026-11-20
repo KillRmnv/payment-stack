@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+. ./lib/env.sh
+ensure_vault_token "${1:-stage}"
 FILE="../backups/payments-$(date +%Y%m%d-%H%M%S).sql.gz"
 mkdir -p ../backups
 docker compose exec -T db pg_dump -U payments payments | gzip > "$FILE"

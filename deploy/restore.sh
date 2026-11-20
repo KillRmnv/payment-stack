@@ -7,6 +7,8 @@ set -euo pipefail
 FILE="${1:?usage: restore.sh <dump.sql.gz> [--verify-only|--apply] [env]}"
 MODE="${2:---verify-only}"
 cd "$(dirname "$0")"
+. ./lib/env.sh
+ensure_vault_token "${3:-stage}"
 [ -f "$FILE" ] || { echo "dump not found: $FILE" >&2; exit 1; }
 if [ -f "$FILE.sha256" ]; then sha256sum -c "$FILE.sha256" || exit 1; fi
 

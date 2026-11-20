@@ -4,6 +4,8 @@ set -euo pipefail
 ENV="${1:?usage: render-env.sh <env> [--strict]}"
 STRICT="${2:-}"
 cd "$(dirname "$0")/.."
+. ./lib/env.sh
+ensure_vault_token "$ENV"
 
 get() {
   docker compose exec -T vault vault kv get -field="$1" "secret/payment-stack/$ENV" 2>/dev/null || true
