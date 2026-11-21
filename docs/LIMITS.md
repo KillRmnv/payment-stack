@@ -56,7 +56,7 @@
 - TLS на ingress не делается; предполагается proxy выше по уровню.
 - DB/Rabbit-пользователи приложения — admin/superuser; worker монтирует весь volume с приватным ключом mock-provider.
 - API/outbox/migrator получают `PROVIDER_API_KEY` через общий runtime env, хотя ключ нужен только worker/mock-provider; least-privilege split env не сделан.
-- `package.sh` сканирует token-like строки, но это эвристика по ограниченному набору расширений; `.git` в ZIP не включается (история с тестовыми `nw-test-*` остаётся вне архива).
+- `package.sh` сканирует token-like строки, но это эвристика по ограниченному набору расширений. По умолчанию `.git` включается; в истории стартера есть тестовые `nw-test-*` плейсхолдеры (не реальные секреты), скрипт предупреждает об этом. Для архива без истории используйте `WITH_GIT=0`.
 - Registry GC/retention не настроены; pipeline делает Trivy image, но не `trivy fs/config`, secret-scan и подписи; `make scan` — локальная команда.
 - Нет SBOM-подписей образов.
 
