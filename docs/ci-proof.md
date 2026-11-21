@@ -3,12 +3,14 @@
 ## Current pipeline (2026-11-21)
 
 - Pipeline: `.github/workflows/pipeline.yml`
-- Last recorded run (before `deploy-smoke` was added): https://github.com/KillRmnv/payment-stack/actions/runs/44895832507 — success
-  - `test` — lint, compose stage+prod, no-destructive, promtool/amtool/nginx, actionlint, api/worker tests
-  - `build-scan-push` — 3 images full+short SHA, Trivy image scans, GHCR push, release artifact
-  - `deploy-stage`/`deploy-prod` — skipped: repository has no self-hosted `stage`/`prod` runners and `STAGE_DEPLOY_ENABLED`/`PROD_DEPLOY_ENABLED` are not set
-- **Added after that run:** `deploy-smoke` on `ubuntu-latest` (push to `main`, not PR). It runs `./scripts/deploy-smoke.sh`: clean `make deploy ENV=stage`, `smoke-idempotency`, `alert-selftest`, `restore-apply-selftest`, `outbox-drill`. This is the Level 2 proof on HEAD; it does not replace self-hosted stage/prod deployment.
+- **Current proof:** https://github.com/KillRmnv/payment-stack/actions/runs/44915220041 — success, commit `2a1b542`.
+  - `test` — 18s: lint, compose stage+prod, no-destructive, promtool/amtool/nginx, actionlint, api/worker tests.
+  - `build-scan-push` — 1m9s: 3 images full+short SHA, Trivy image scans, GHCR push, release artifact.
+  - `deploy-smoke` — 2m18s: `./scripts/deploy-smoke.sh` (clean `make deploy ENV=stage`, `smoke-idempotency`, `alert-selftest`, `restore-apply-selftest`, `outbox-drill`). **This is the Level 2 proof on HEAD.**
+  - `deploy-stage`/`deploy-prod` — skipped: repository has no self-hosted `stage`/`prod` runners and `STAGE_DEPLOY_ENABLED`/`PROD_DEPLOY_ENABLED` are not set.
 - `deploy-stage`/`deploy-prod` still require self-hosted runners, `*_DEPLOY_PATH`, and `*_DEPLOY_ENABLED`; without them those jobs skip. Prod can run when stage is intentionally skipped, but a failed stage or build blocks prod.
+- Non-blocking annotation: GitHub warns that `actions/checkout@v4`, `setup-python@v5`, `upload-artifact@v4`, `docker/login-action@v3` target Node 20 and are force-run on Node 24; update action majors when convenient.
+- Previous run (before `deploy-smoke`): https://github.com/KillRmnv/payment-stack/actions/runs/44895832507 — test/build only, deploy skipped.
 
 ## HEAD deploy-smoke (local equivalent, 2026-11-21)
 
