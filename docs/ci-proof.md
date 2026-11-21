@@ -1,6 +1,18 @@
-# CI proof (local, 2026-11-20)
+# CI proof
 
-> Historical proof for commit `64d1999`. Current pipeline is `.github/workflows/pipeline.yml` (test → build/scan/push → deploy stage/prod); this historical log is not proof for the current HEAD. Re-run the pipeline and update this file with the new run links before submission.
+## Current pipeline (2026-11-21)
+
+- Commit: `6edf65d` (`ci: unified test/build/deploy pipeline`)
+- Pipeline: `.github/workflows/pipeline.yml`
+- Run: https://github.com/KillRmnv/payment-stack/actions/runs/44895832507 — success
+  - `test` — 17s: lint, compose stage+prod, no-destructive, promtool/amtool/nginx, actionlint, api/worker tests
+  - `build-scan-push` — 1m3s: 3 images full+short SHA, Trivy image scans, GHCR push, release artifact
+  - `deploy-stage`/`deploy-prod` — skipped: repository has no self-hosted `stage`/`prod` runners and `STAGE_DEPLOY_ENABLED`/`PROD_DEPLOY_ENABLED` are not set
+- CD deploy code is in `pipeline.yml`; enabling it requires self-hosted runners, `*_DEPLOY_PATH`, and `*_DEPLOY_ENABLED` variables. This run proves build/scan/push, **not** an actual deploy.
+
+## Historical proof (local, 2026-11-20)
+
+> The log below is for commit `64d1999`; it is kept for history and is not proof for the current HEAD.
 
 
 Machine: Linux + Docker 29.10.0 + Compose v5.8.0, Python 3.12, commit `64d1999`, `2026-11-20T19:40:42Z`.
