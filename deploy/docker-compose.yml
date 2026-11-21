@@ -1,3 +1,5 @@
+name: payment-stack-${STACK_ENV:-stage}
+
 services:
   vault:
     image: hashicorp/vault:1.18@sha256:750bb37c1638fa194ab37053a81618c61bb0491ddec6fccac87c07a8e6cd8166
@@ -22,7 +24,7 @@ services:
 
   db:
     image: postgres:16.4-bookworm@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     environment:
       POSTGRES_USER: payments
       POSTGRES_DB: payments
@@ -42,12 +44,16 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management@sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     environment:
       RABBITMQ_DEFAULT_USER: payments
+      RABBITMQ_ENABLED_PLUGINS_FILE: /etc/rabbitmq/enabled_plugins
     volumes:
       - rabbitmq:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     # NOTE: management UI (15672) НЕ публикуем в base — только stage-overlay на 127.0.0.1.
+    # Prometheus plugin (15692) слушает только compose-сеть; его скрапит prometheus.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -65,7 +71,7 @@ services:
     build:
       context: ..
       dockerfile: services/api/Dockerfile
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     environment:
       POSTGRES_USER: payments
       POSTGRES_DB: payments
@@ -81,13 +87,14 @@ services:
     build:
       context: ..
       dockerfile: services/api/Dockerfile
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     environment:
       POSTGRES_USER: payments
       POSTGRES_DB: payments
       RABBITMQ_DEFAULT_USER: payments
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       APP_VERSION: ${APP_VERSION:-dev}
+      REQUIRE_IDEMPOTENCY_KEY: ${REQUIRE_IDEMPOTENCY_KEY:-true}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)\""]
       interval: 5s
@@ -111,7 +118,7 @@ services:
     build:
       context: ..
       dockerfile: services/worker/Dockerfile
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     environment:
       POSTGRES_USER: payments
       POSTGRES_DB: payments
@@ -119,6 +126,12 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - provider-certs:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy
@@ -133,12 +146,43 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  outbox:
+    image: northwind/payment-worker:${APP_VERSION:-dev}
+    command: ["python", "-m", "worker.outbox"]
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_DB: payments
+      RABBITMQ_DEFAULT_USER: payments
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STACK_ENV: ${STACK_ENV:-stage}
+      BACKUP_METRICS_FILE: /metrics/backup-${STACK_ENV:-stage}.prom
+    volumes:
+      - ../.metrics:/metrics:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
   mock-provider:
     image: northwind/mock-provider:${APP_VERSION:-dev}
     build:
       context: ..
       dockerfile: mock-provider/Dockerfile
-    env_file: runtime.env
+    env_file: ${RUNTIME_ENV_FILE:-runtime.stage.env}
     volumes:
       - provider-certs:/certs
     healthcheck:
@@ -163,6 +207,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost/healthz >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     logging:
       driver: json-file
@@ -177,7 +226,31 @@ services:
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9090/-/healthy >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     # NOTE: 9090 НЕ публикуем в base. Для отладки — stage-overlay на 127.0.0.1:9090.
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  alert-sink:
+    image: python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+    command: ["python", "/app/alert-sink.py"]
+    volumes:
+      - ../monitoring/alert-sink.py:/app/alert-sink.py:ro
+    environment:
+      ALERT_SINK_PORT: 8080
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     logging:
       driver: json-file
@@ -190,8 +263,16 @@ services:
     command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
     volumes:
       - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-    # NOTE: 9093 НЕ публикуем в base (как и 9090). Доставка по умолчанию blackhole;
-    # свой receiver настраивается в monitoring/alertmanager.yml.
+    depends_on:
+      alert-sink:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9093/-/healthy >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # NOTE: 9093 НЕ публикуем в base (как и 9090). Receiver — local alert-sink;
+    # внешний pager/webhook подключается заменой URL в monitoring/alertmanager.yml.
     restart: unless-stopped
     logging:
       driver: json-file

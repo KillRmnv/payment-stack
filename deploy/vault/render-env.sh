@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Render runtime.env from Vault. Fail-fast: missing secret = hard error.
 set -euo pipefail
+umask 077
 ENV="${1:?usage: render-env.sh <env> [--strict]}"
 STRICT="${2:-}"
 cd "$(dirname "$0")/.."
 . ./lib/env.sh
 ensure_vault_token "$ENV"
+touch "$RUNTIME_ENV_FILE"
+OUT="$RUNTIME_ENV_FILE"
 
 get() {
   docker compose exec -T vault vault kv get -field="$1" "secret/payment-stack/$ENV" 2>/dev/null || true
@@ -39,9 +42,10 @@ if [ "$STRICT" = "--strict" ]; then
   fi
 fi
 
-cat > runtime.env <<EOT
+cat > "$OUT" <<EOT
 POSTGRES_PASSWORD=${DB_PASSWORD_VAULT}
 RABBITMQ_DEFAULT_PASS=${MQ_PASSWORD_VAULT}
 PROVIDER_API_KEY=${PROVIDER_KEY_VAULT}
 EOT
-echo "rendered runtime.env for $ENV"
+chmod 600 "$OUT"
+echo "rendered $OUT for $ENV"

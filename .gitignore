@@ -4,8 +4,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 deploy/runtime.env
+deploy/runtime.*.env
 deploy/.env
 backups/
+.metrics/
 .deploy-state-*
+.deploy-history-*
+.deploy-lock-*
 .vault-token-*
 *.log

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -11,6 +12,12 @@ from starlette.routing import Route
 
 from . import broker
 from .config import load_settings
+from .idempotency import (
+    IdempotencyConflict,
+    InvalidIdempotencyKey,
+    normalize_key,
+    request_hash,
+)
 from .validation import InvalidTransfer, parse_transfer, to_minor
 
 settings = load_settings()
@@ -25,6 +32,28 @@ REQUESTS = Counter("api_requests_total", "HTTP requests", ["method", "path", "st
 LATENCY = Histogram("api_request_duration_seconds", "Request latency", ["method", "path"])
 PENDING = Gauge("api_pending_transfers", "Pending transfers")
 OLDEST_PENDING = Gauge("api_oldest_pending_seconds", "Age of oldest PENDING transfer")
+DB_UP = Gauge("api_db_up", "Database reachable from API (1/0)")
+BROKER_UP = Gauge("api_broker_up", "RabbitMQ reachable from API (1/0)")
+TRANSFERS = Gauge("api_transfers", "Transfers by status", ["status"])
+
+INSERT_TRANSFER = """
+INSERT INTO transfers
+    (id, amount_minor, currency, recipient, status, client_ip, idempotency_key, request_hash)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+RETURNING id, amount_minor, currency, recipient, status, provider_reference
+"""
+INSERT_TRANSFER_IDEMPOTENT = """
+INSERT INTO transfers
+    (id, amount_minor, currency, recipient, status, client_ip, idempotency_key, request_hash)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id, amount_minor, currency, recipient, status, provider_reference
+"""
+SELECT_BY_IDEMPOTENCY_KEY = """
+SELECT id, amount_minor, currency, recipient, status, provider_reference, request_hash
+FROM transfers WHERE idempotency_key = %s
+"""
+INSERT_OUTBOX = "INSERT INTO transfer_outbox (transfer_id, payload) VALUES (%s, %s::jsonb)"
 
 
 def count(request, response):
@@ -55,18 +84,32 @@ async def _check(fn, name):
         return False
 
 
+def _health_response(request, checks):
+    ok = all(v == "up" for v in checks.values())
+    body = {"status": "ok" if ok else "degraded", "version": settings.app_version, "checks": checks}
+    return count(request, JSONResponse(body, status_code=200 if ok else 503))
+
+
 async def health(request):
-    # Каждый чек со своим таймаутом: падение DB не должно маскировать broker
-    # как "down". Раньше db 3s + broker 3s подряд висели 6s и curl отваливался.
+    # Liveness/diagnostics: broker is part of overall health.
     db_ok, broker_ok = await asyncio.gather(
         _check(_db_ok, "db"),
         _check(lambda: broker.ping(settings), "broker"),
     )
-    checks = {"db": "up" if db_ok else "down", "broker": "up" if broker_ok else "down"}
-    ok = all(v == "up" for v in checks.values())
-    body = {"status": "ok" if ok else "degraded", "version": settings.app_version, "checks": checks}
-    resp = JSONResponse(body, status_code=200 if ok else 503)
-    return count(request, resp)
+    DB_UP.set(1 if db_ok else 0)
+    BROKER_UP.set(1 if broker_ok else 0)
+    return _health_response(
+        request,
+        {"db": "up" if db_ok else "down", "broker": "up" if broker_ok else "down"},
+    )
+
+
+async def ready(request):
+    # Readiness: with the outbox, the API can accept transfers whenever DB is
+    # writable. A broker outage must not drain traffic from the write path.
+    db_ok = await _check(_db_ok, "db")
+    DB_UP.set(1 if db_ok else 0)
+    return _health_response(request, {"db": "up" if db_ok else "down"})
 
 
 def row_to_json(row):
@@ -91,23 +134,77 @@ async def create_transfer(request):
             amount, currency, recipient = parse_transfer(await request.json())
         except (InvalidTransfer, ValueError) as exc:
             return count(request, JSONResponse({"error": str(exc)}, status_code=400))
+
+        try:
+            idempotency_key = normalize_key(request.headers.get("idempotency-key"))
+        except InvalidIdempotencyKey as exc:
+            return count(request, JSONResponse({"error": str(exc)}, status_code=400))
+        if settings.require_idempotency_key and idempotency_key is None:
+            return count(
+                request,
+                JSONResponse({"error": "Idempotency-Key header is required"}, status_code=400),
+            )
+
         transfer_id = uuid.uuid4()
         client_ip = request.client.host if request.client else None
-        request_id = request.headers.get("x-request-id", str(transfer_id))
+        req_hash = request_hash(amount, currency, recipient)
+        request_id = request.headers.get("x-request-id") or str(transfer_id)
+        replayed = False
         try:
-            with psycopg.connect(settings.dsn) as conn:
-                conn.execute(
-                    "INSERT INTO transfers (id, amount_minor, currency, recipient, status, client_ip) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (transfer_id, to_minor(amount), currency, recipient, "PENDING", client_ip),
+            with psycopg.connect(settings.dsn) as conn, conn.transaction():
+                values = (
+                    transfer_id,
+                    to_minor(amount),
+                    currency,
+                    recipient,
+                    "PENDING",
+                    client_ip,
+                    idempotency_key,
+                    req_hash,
                 )
-                row = conn.execute(SELECT, (transfer_id,)).fetchone()
-            broker.publish(settings, {"transfer_id": str(transfer_id)})
+                if idempotency_key is None:
+                    row = conn.execute(INSERT_TRANSFER, values).fetchone()
+                else:
+                    row = conn.execute(INSERT_TRANSFER_IDEMPOTENT, values).fetchone()
+                    if row is None:
+                        existing = conn.execute(
+                            SELECT_BY_IDEMPOTENCY_KEY, (idempotency_key,)
+                        ).fetchone()
+                        if existing is None:
+                            raise RuntimeError("idempotency conflict without existing row")
+                        if existing[6] != req_hash:
+                            raise IdempotencyConflict
+                        row = existing[:6]
+                        replayed = True
+                if not replayed:
+                    conn.execute(
+                        INSERT_OUTBOX,
+                        (transfer_id, json.dumps({"transfer_id": str(transfer_id)})),
+                    )
+        except IdempotencyConflict:
+            log.warning("idempotency key reused with a different body request_id=%s", request_id)
+            return count(
+                request,
+                JSONResponse(
+                    {"error": "idempotency key reused with a different request"},
+                    status_code=409,
+                ),
+            )
         except Exception:
             log.exception("create_transfer failed request_id=%s", request_id)
             return count(request, JSONResponse({"error": "internal"}, status_code=500))
-        log.info("transfer created id=%s request_id=%s", transfer_id, request_id)
-        resp = JSONResponse(row_to_json(row), status_code=202, headers={"X-Request-Id": request_id})
-        return count(request, resp)
+
+        status = 200 if replayed else 202
+        headers = {"X-Request-Id": request_id}
+        if replayed:
+            headers["X-Idempotent-Replay"] = "true"
+        log.info(
+            "transfer %s id=%s request_id=%s",
+            "replayed" if replayed else "created",
+            row[0],
+            request_id,
+        )
+        return count(request, JSONResponse(row_to_json(row), status_code=status, headers=headers))
     finally:
         # Latency на всех исходах (2xx/4xx/5xx), иначе p99 занижен.
         LATENCY.labels("POST", "transfers").observe(time.time() - start)
@@ -134,6 +231,14 @@ async def get_transfer(request):
 
 
 async def metrics(request):
+    # Health gauges must be fresh even when /health is not being called; this is
+    # what DbDown/BrokerDown rely on when the API itself is still serving.
+    db_ok, broker_ok = await asyncio.gather(
+        _check(_db_ok, "db"),
+        _check(lambda: broker.ping(settings), "broker"),
+    )
+    DB_UP.set(1 if db_ok else 0)
+    BROKER_UP.set(1 if broker_ok else 0)
     try:
         with psycopg.connect(settings.dsn) as conn:
             prow = conn.execute(
@@ -141,6 +246,14 @@ async def metrics(request):
             ).fetchone()
             PENDING.set(prow[0] or 0)
             OLDEST_PENDING.set(float(prow[1] or 0))
+            counts = {
+                status: int(count)
+                for status, count in conn.execute(
+                    "SELECT status, count(*) FROM transfers GROUP BY status"
+                )
+            }
+            for status in ("PENDING", "COMPLETED", "FAILED"):
+                TRANSFERS.labels(status).set(counts.get(status, 0))
     except Exception:  # noqa: BLE001 — /metrics must never 500 on DB outage
         # БД недоступна: gauges НЕ трогаем (храним последнее значение),
         # отсутствие свежих данных ловит алерт MetricsStaleBusiness.
@@ -152,7 +265,7 @@ async def metrics(request):
 app = Starlette(
     routes=[
         Route("/health", health),
-        Route("/ready", health),
+        Route("/ready", ready),
         Route("/metrics", metrics),
         Route("/transfers", create_transfer, methods=["POST"]),
         Route("/transfers/{transfer_id}", get_transfer),

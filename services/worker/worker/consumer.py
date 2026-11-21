@@ -3,11 +3,12 @@ import time
 
 import pika
 import psycopg
-from prometheus_client import Counter, start_http_server
+from prometheus_client import Counter, Gauge
 
 from .config import load_settings
-from .messages import PoisonMessage, parse_message
-from .provider import send_payout
+from .healthserver import HealthState, start_health_server
+from .messages import PoisonMessage, parse_message, parse_retry_count
+from .provider import ProviderProtocolError, send_payout
 
 log = logging.getLogger("worker")
 QUEUE = "transfers"
@@ -15,6 +16,8 @@ DLQ = "transfers.dlq"
 MAX_RETRIES = 5
 MESSAGES = Counter("worker_messages_total", "Processed messages", ["result"])
 DLQ_PUBLISHED = Counter("worker_dlq_published_total", "Total messages published to DLQ")
+READY = Gauge("worker_ready", "Worker consumer is connected and ready")
+HEALTH = HealthState()
 
 
 def process(settings, body):
@@ -49,14 +52,22 @@ def process(settings, body):
     return "processed"
 
 
+def publish_confirmed(channel, routing_key, body, headers=None):
+    # pika raises NackError/UnroutableError/AMQPError when publisher confirms
+    # fail and returns None on success. Some versions may return False.
+    confirmed = channel.basic_publish(
+        exchange="",
+        routing_key=routing_key,
+        body=body,
+        properties=pika.BasicProperties(delivery_mode=2, headers=headers or {}),
+    )
+    if confirmed is False:
+        raise RuntimeError(f"RabbitMQ did not confirm publish to {routing_key}")
+
+
 def publish_dlq(channel, body, reason):
     channel.queue_declare(queue=DLQ, durable=True)
-    channel.basic_publish(
-        exchange="",
-        routing_key=DLQ,
-        body=body,
-        properties=pika.BasicProperties(delivery_mode=2, headers={"x-death-reason": reason}),
-    )
+    publish_confirmed(channel, DLQ, body, headers={"x-death-reason": reason})
     DLQ_PUBLISHED.inc()
 
 
@@ -65,7 +76,7 @@ def main():
     logging.basicConfig(
         level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
-    start_http_server(8001)
+    start_health_server(8001, HEALTH)
     credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_password)
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(host=settings.rabbitmq_host, credentials=credentials)
@@ -73,12 +84,17 @@ def main():
     channel = connection.channel()
     channel.queue_declare(queue=QUEUE, durable=True)
     channel.queue_declare(queue=DLQ, durable=True)
+    channel.confirm_delivery()
     channel.basic_qos(prefetch_count=1)
+    READY.set(1)
+    HEALTH.ready = True
+    HEALTH.detail = f"consuming {QUEUE}"
 
     def on_message(ch, method, properties, body):
-        headers = (properties.headers or {}) if properties else {}
-        retries = int(headers.get("x-retry-count", 0))
         try:
+            # Headers are untrusted input. Keep this inside try: malformed
+            # x-retry-count must go to DLQ, not crash the callback forever.
+            retries = parse_retry_count(properties)
             result = process(settings, body)
             MESSAGES.labels(result).inc()
             ch.basic_ack(method.delivery_tag)
@@ -92,6 +108,12 @@ def main():
             log.warning("unknown transfer, sending to DLQ: %s", exc)
             publish_dlq(ch, body, f"unknown-transfer: {exc}")
             MESSAGES.labels("poison").inc()
+            ch.basic_ack(method.delivery_tag)
+        except ProviderProtocolError as exc:
+            # A malformed/unexpected provider answer will not improve on retry.
+            log.error("provider protocol error, sending to DLQ: %s", exc)
+            publish_dlq(ch, body, f"provider-protocol: {exc}")
+            MESSAGES.labels("dlq").inc()
             ch.basic_ack(method.delivery_tag)
         except Exception:
             log.exception("failed to process message retries=%s", retries)
@@ -110,14 +132,7 @@ def main():
                 delay = min(2**retries, 16)
                 log.info("retry %s/%s in %ss", retries + 1, MAX_RETRIES, delay)
                 time.sleep(delay)
-                ch.basic_publish(
-                    exchange="",
-                    routing_key=QUEUE,
-                    body=body,
-                    properties=pika.BasicProperties(
-                        delivery_mode=2, headers={"x-retry-count": retries + 1}
-                    ),
-                )
+                publish_confirmed(ch, QUEUE, body, headers={"x-retry-count": retries + 1})
                 ch.basic_ack(method.delivery_tag)
 
     channel.basic_consume(queue=QUEUE, on_message_callback=on_message)

@@ -21,6 +21,7 @@ class Settings:
     provider_api_key: str
     log_level: str
     app_version: str
+    require_idempotency_key: bool
 
     @property
     def dsn(self):
@@ -39,4 +40,6 @@ def load_settings():
         provider_api_key=required("PROVIDER_API_KEY"),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         app_version=os.environ.get("APP_VERSION", "dev"),
+        require_idempotency_key=os.environ.get("REQUIRE_IDEMPOTENCY_KEY", "true").lower()
+        not in ("0", "false", "no"),
     )

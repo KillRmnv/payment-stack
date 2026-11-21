@@ -15,7 +15,10 @@ if [ -f "deploy/env/$ENV.env" ]; then set -a; . "deploy/env/$ENV.env"; set +a; P
 BASE="${SMOKE_BASE:-http://localhost:$PORT}"
 
 echo "smoke $ENV $BASE"
-ID="$(curl -fsS -X POST "$BASE/transfers" -H 'Content-Type: application/json' \
+IDEM_KEY="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+ID="$(curl -fsS -X POST "$BASE/transfers" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $IDEM_KEY" \
   -d '{"amount":"100.00","currency":"RUB","recipient":"TH1234567890"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
 echo "created $ID"
 for i in $(seq 1 30); do

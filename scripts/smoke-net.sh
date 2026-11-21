@@ -14,10 +14,15 @@ import json
 import sys
 import time
 import urllib.request
+import uuid
 
 BASE = sys.argv[1]
 body = json.dumps({"amount": "100.00", "currency": "RUB", "recipient": "TH1234567890"}).encode()
-req = urllib.request.Request(f"{BASE}/transfers", data=body, headers={"Content-Type": "application/json"})
+req = urllib.request.Request(
+    f"{BASE}/transfers",
+    data=body,
+    headers={"Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())},
+)
 with urllib.request.urlopen(req, timeout=15) as r:
     transfer_id = json.load(r)["id"]
 print(f"created {transfer_id}", flush=True)

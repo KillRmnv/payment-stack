@@ -8,6 +8,7 @@ ENV="${1:?usage: rotate.sh <env>}"
 cd "$(dirname "$0")/.."
 . ./lib/env.sh
 ensure_vault_token "$ENV"
+acquire_deploy_lock "$ENV"
 
 : "${DB_PASSWORD:?set DB_PASSWORD in host env (new value)}"
 : "${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in host env (new value)}"

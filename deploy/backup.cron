@@ -1,6 +1,10 @@
 # Cron-пример для хоста: бэкап payments каждый час.
+# PATH нужен, потому что cron не наследует интерактивный PATH (docker/make).
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Установка (на хосте, не в контейнере):
 #   crontab -e
-#   0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup >> /var/log/payment-backup.log 2>&1
-# KEEP_DAYS переопределяется через env: KEEP_DAYS=30 make backup
-0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup >> /var/log/payment-backup.log 2>&1
+# KEEP_DAYS переопределяется через env: KEEP_DAYS=30 make backup ENV=stage
+# Бэкапы лежат в backups/<env>/ и НЕ смешиваются между окружениями.
+0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup ENV=stage >> /var/log/payment-backup.log 2>&1
+# На prod-хосте используйте ENV=prod (не запускайте оба на одном хосте без разделения проектов):
+# 0 * * * * cd /opt/payment-stack/payment-stack-starter && make backup ENV=prod >> /var/log/payment-backup.log 2>&1

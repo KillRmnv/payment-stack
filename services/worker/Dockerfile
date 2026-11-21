@@ -13,5 +13,5 @@ COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser services/worker/worker ./worker
 ENV PATH=/home/appuser/.local/bin:$PATH
 USER appuser
-EXPOSE 8001
+EXPOSE 8001 8002
 CMD ["python", "-m", "worker.consumer"]

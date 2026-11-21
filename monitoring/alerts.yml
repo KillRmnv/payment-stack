@@ -1,6 +1,17 @@
 groups:
   - name: payment-stack
     rules:
+      # Dead man's switch: this alert must always be delivered. If the sink stops
+      # receiving it, the alerting chain is broken.
+      - alert: Watchdog
+        expr: vector(1)
+        labels: {severity: none}
+        annotations: {summary: "Always firing — alert delivery heartbeat"}
+      - alert: AlertSinkDown
+        expr: up{job="alert-sink"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Alert sink is down — Alertmanager deliveries are lost"}
       - alert: ApiDown
         expr: up{job="api"} == 0
         for: 2m
@@ -11,21 +22,123 @@ groups:
         for: 2m
         labels: {severity: critical}
         annotations: {summary: "Worker not scraping — payouts stall"}
+      - alert: WorkerNotReady
+        expr: worker_ready == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Worker metrics are up but consumer is not ready"}
+      - alert: OutboxNotReady
+        expr: outbox_ready == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Outbox metrics are up but relay is not ready"}
+      - alert: RabbitMQDown
+        expr: up{job="rabbitmq"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "RabbitMQ exporter not scraping — queue depth blind"}
+      - alert: OutboxDown
+        expr: up{job="outbox"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Outbox relay not scraping — new transfers stop reaching RabbitMQ"}
+      - alert: OutboxStale
+        expr: outbox_oldest_seconds > 120
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Oldest outbox row is older than 2m — publishes are failing"}
+      - alert: OutboxPendingHigh
+        expr: outbox_pending > 100
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Outbox pending >100 for 10m — relay/broker is not keeping up"}
+      - alert: OutboxPublishErrors
+        expr: increase(outbox_publish_errors_total[5m]) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Outbox publish errors in the last 5m"}
+      - alert: BackupMissing
+        expr: backup_last_success_timestamp_seconds == 0
+        for: 10m
+        labels: {severity: critical}
+        annotations: {summary: "No successful backup has been recorded"}
+      - alert: BackupStale
+        expr: backup_age_seconds > 7200
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Last successful backup is older than 2h"}
+      - alert: ProviderDown
+        expr: up{job="mock-provider"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "mock-provider metrics are not scraping — payout dependency may be down"}
+      - alert: ProviderFailing
+        expr: provider_failing == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "mock-provider fail-mode has been enabled for 10m"}
+      - alert: ProviderCertMissing
+        expr: provider_cert_expiry_seconds < 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "mock-provider TLS cert is missing or unreadable"}
+      - alert: ProviderCertExpiry
+        expr: provider_cert_expiry_seconds >= 0 and provider_cert_expiry_seconds < 30 * 24 * 3600
+        for: 1h
+        labels: {severity: warning}
+        annotations: {summary: "mock-provider TLS cert expires in less than 30 days"}
+      - alert: OrphanPending
+        expr: outbox_orphan_pending > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "PENDING transfers exist without an outbox row"}
+      - alert: DbDown
+        expr: api_db_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "API cannot reach PostgreSQL"}
+      - alert: BrokerDown
+        expr: api_broker_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "API cannot reach RabbitMQ (outbox should absorb writes)"}
       - alert: ApiHighLatency
-        expr: histogram_quantile(0.99, rate(api_request_duration_seconds_bucket[5m])) > 1
+        expr: histogram_quantile(0.99, sum by (le) (rate(api_request_duration_seconds_bucket{path="transfers"}[5m]))) > 1
         for: 5m
         labels: {severity: warning}
         annotations: {summary: "API p99 > 1s for 5m"}
+      - alert: ApiSuccessRateLow
+        expr: |
+          (sum(rate(api_requests_total{path="transfers",status=~"2.."}[5m]))
+           / clamp_min(sum(rate(api_requests_total{path="transfers"}[5m])), 0.000001) < 0.99)
+          and
+          (sum(rate(api_requests_total{path="transfers"}[5m])) > 0.01)
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Transfer API success rate <99% for 5m"}
+      - alert: PendingHigh
+        expr: api_pending_transfers > 100
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "More than 100 PENDING transfers for 10m"}
       - alert: PoisonQueueGrowing
         expr: increase(worker_messages_total{result="poison"}[10m]) > 0
         for: 2m
         labels: {severity: warning}
         annotations: {summary: "Poison messages hit DLQ in last 10m"}
+      # Depth-based: stays firing while messages are physically in the DLQ.
+      # The old increase()-based version resolved after 10m even if the queue
+      # was still full, so a stuck transfer stopped paging.
       - alert: DlqNonEmpty
-        expr: increase(worker_messages_total{result=~"dlq|poison"}[10m]) > 0
+        expr: rabbitmq_queue_messages{queue="transfers.dlq"} > 0
         for: 2m
         labels: {severity: critical}
-        annotations: {summary: "Messages exhausted retries or poison hit DLQ in last 10m"}
+        annotations: {summary: "transfers.dlq is not empty — replay or triage required"}
+      - alert: TransferQueueBacklog
+        expr: rabbitmq_queue_messages{queue="transfers"} > 100
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "transfers queue depth >100 for 10m — worker/provider stuck"}
       # Meta-monitoring: silence != healthy. If metrics stop flowing, fire.
       - alert: MetricsStaleBusiness
         expr: absent(api_oldest_pending_seconds) or absent(api_pending_transfers)

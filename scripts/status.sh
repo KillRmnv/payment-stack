@@ -6,7 +6,7 @@ ENV="${1:-stage}"
 ensure_vault_token "$ENV"
 if [ -f "env/$ENV.env" ]; then set -a; . "env/$ENV.env"; set +a; fi
 PORT="${API_PORT:-8080}"
-for service in api worker mock-provider db rabbitmq vault prometheus; do
+for service in api worker outbox mock-provider db rabbitmq vault prometheus alertmanager alert-sink reverse-proxy; do
   docker compose ps "$service" 2>/dev/null || true
 done
 echo "--- health ---"
@@ -21,9 +21,13 @@ echo
 echo "--- metrics (in-network: edge proxy не публикует /metrics) ---"
 docker compose --env-file "env/$ENV.env" -f docker-compose.yml -f "compose.$ENV.yml" exec -T worker python3 -c "
 import urllib.request
-body = urllib.request.urlopen('http://api:8000/metrics', timeout=5).read().decode()
-print('\n'.join(l for l in body.splitlines() if l.startswith(('api_pending_transfers','api_oldest_pending_seconds','api_requests_total','worker_messages_total','worker_dlq_published_total'))))
-" 2>/dev/null || echo "metrics unavailable in-network (api down?)"
+for url in ('http://api:8000/metrics', 'http://outbox:8002/metrics'):
+    try:
+        body = urllib.request.urlopen(url, timeout=5).read().decode()
+        print('\n'.join(l for l in body.splitlines() if l.startswith(('api_pending_transfers','api_oldest_pending_seconds','api_requests_total','worker_messages_total','worker_dlq_published_total','outbox_'))))
+    except Exception as exc:
+        print(f'{url}: {exc}')
+" 2>/dev/null || echo "metrics unavailable in-network (api/outbox down?)"
 echo "--- prometheus ---"
 PROM_PORT=""
 [ "$ENV" = "stage" ] && PROM_PORT="9090"
