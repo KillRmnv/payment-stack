@@ -12,7 +12,7 @@ Pipeline `.github/workflows/pipeline.yml`: `test → build-scan-push → deploy-
 Включается repository variables:
 - `STAGE_DEPLOY_ENABLED=true`, `STAGE_DEPLOY_PATH=/opt/payment-stack`, опционально `STAGE_PROJECT`/`STAGE_RUNTIME_ENV`;
 - `PROD_DEPLOY_ENABLED=true`, `PROD_DEPLOY_PATH=...`, опционально `PROD_PROJECT`/`PROD_RUNTIME_ENV`.
-Нужны self-hosted runners с labels `stage`/`prod`, Git/Docker/make и persistent checkout path с runtime/Vault-секретами. Prod использует environment approval. Deploy делает `git fetch && git checkout --force $GITHUB_SHA`, затем `make deploy`, stage дополнительно `alert-selftest` и `smoke-idempotency`. Без runners/vars deploy jobs пропускаются, pipeline остаётся зелёным. Registry images (full/short SHA) — артефакт сборки/rollback, deploy собирает тот же SHA локально.
+Нужны self-hosted runners с labels `stage`/`prod`, Git/Docker/make и persistent checkout path с runtime/Vault-секретами. Prod использует environment approval. Deploy делает `git fetch && git checkout --force $GITHUB_SHA`, затем `make deploy`, stage дополнительно `alert-selftest` и `smoke-idempotency`. Без runners/vars deploy jobs пропускаются, pipeline остаётся зелёным. Отдельный `deploy-smoke` на ubuntu-latest всегда (на push в main) делает clean `make deploy` + idempotency/alert/restore/outbox и является доказательством HEAD. Registry images (full/short SHA) — артефакт сборки/rollback, deploy собирает тот же SHA локально.
 
 ## Smoke: хост vs сеть
 Хост может не доставать до published-портов (VPN/файрвол режет host→bridge). `deploy.sh`, `rollback.sh` и `restore.sh` сами выбирают: есть `curl` **и** `python3` и доступен `localhost:${API_PORT}/health` → `smoke.sh`, иначе → `scripts/smoke-net.sh` (тот же сценарий POST→COMPLETED, но трафик внутри compose-сети через `reverse-proxy`). Вручную: `SMOKE_BASE=http://reverse-proxy ./scripts/smoke.sh` не выйдет (curl с хоста) — используй `smoke-net.sh`. Проверка учениями — только in-network. `status.sh` тоже умеет fallback (host → exec через worker).
@@ -30,7 +30,7 @@ make deploy ENV=stage
 `make rollback ENV=stage VERSION=<version>`; версию смотри в `.deploy-history-stage` (timestamp, kind, version, image IDs), а не только в `.deploy-state-stage`: state хранит последнюю успешную версию, истории предыдущих там нет. Успешный ручной откат обновляет `.deploy-state-stage`, поэтому следующий deploy не примет плохую версию за `PREV`. Образ отката должен быть локально (`docker image inspect`); без `.git`/`dev`-тега откат невозможен — используй образцы тегов из history. Схема НЕ откатывается: если миграция уже ушла, старый код должен быть совместим, иначе чини forward-миграцией `005_...`. Автооткат в `deploy.sh` откатывает `api worker outbox mock-provider` на smoke/readiness-фейле; при нездоровых DB/Rabbit код не откатывается. Сломанная миграция и bind-mount конфиги nginx/monitoring автооткатом не чинятся. Если версия старше outbox (pre-`004`/pre-outbox), откат останавливает `outbox` и возвращает старый direct-publish путь. Ручной rollback и deploy/rotate/restore сериализованы `flock`.
 
 ## Пропали секреты
-`render-env.sh` падает `FATAL: missing secrets` → проверь `docker compose exec -T vault vault kv get secret/payment-stack/stage`.
+`render-env.sh` падает `FATAL: missing secrets` → проверь `./scripts/dc.sh stage exec -T vault vault kv get secret/payment-stack/stage`.
 Если ключ есть, но битый/устаревший, `seed.sh` без флага ничего не сделает (защита от затирания). Если меняются DB/Rabbit-пароли — только `./deploy/vault/rotate.sh stage` (см. выше). Если меняется только provider key:
 ```
 export DB_PASSWORD=... RABBITMQ_PASSWORD=... PROVIDER_API_KEY=...
@@ -42,8 +42,8 @@ make deploy ENV=stage
 
 ## Очередь растет (PENDING стареет)
 1. `./scripts/status.sh stage` (метрики тянет in-network, `/metrics` наружу закрыт) или `curl 127.0.0.1:9090/api/v1/query?query=api_pending_transfers` в stage.
-2. Глубина очередей: `curl 127.0.0.1:9090/api/v1/query?query=rabbitmq_queue_messages` или `docker compose --env-file env/stage.env -f docker-compose.yml -f compose.stage.yml exec -T rabbitmq rabbitmqctl list_queues name messages consumers`.
-3. `docker compose logs worker` (retry/poison/dlq, `request_id=transfer_id`).
+2. Глубина очередей: `curl 127.0.0.1:9090/api/v1/query?query=rabbitmq_queue_messages` или `./scripts/dc.sh stage exec -T rabbitmq rabbitmqctl list_queues name messages consumers`.
+3. `./scripts/dc.sh stage logs worker` (retry/poison/dlq, `request_id=transfer_id`).
 4. Проверь `mock-provider failing` (с ключом: `curl -X POST -H 'X-Admin-Key: $PROVIDER_API_KEY' .../admin/fail-mode`) и алерты `PoisonQueueGrowing`, `DlqNonEmpty` (теперь `rabbitmq_queue_messages{queue="transfers.dlq"} > 0`), `TransferQueueBacklog`, `OldestPendingTooOld`, `RabbitMQDown`.
 
 Разбор DLQ:
@@ -57,18 +57,18 @@ make dlq-replay ENV=stage ARGS="--all"       # включая poison (обычн
 ## Outbox застрял / RabbitMQ недоступен
 API принимает перевод в `transfer_outbox` даже при упавшем RabbitMQ: `POST /transfers` → 202, `/health` покажет `broker=down`, `/ready` останется 200 (проверяет только БД). Смотри:
 ```
-docker compose logs outbox
-docker compose exec -T db psql -U payments -d payments -c \
+./scripts/dc.sh stage logs outbox
+./scripts/dc.sh stage exec -T db psql -U payments -d payments -c \
   "SELECT status,count(*),min(created_at),max(attempts) FROM transfer_outbox GROUP BY status;"
 ```
 Метрики: `outbox_pending`, `outbox_oldest_seconds`, `outbox_publish_errors_total`; алерты `OutboxDown/OutboxStale/OutboxPendingHigh/OutboxPublishErrors`.
-Если outbox лежит — перезапусти `docker compose restart outbox`; если broker недоступен — чини RabbitMQ, outbox сам переподключится и дошлёт. Учение: `make outbox-drill ENV=stage` (останавливает RabbitMQ, проверяет 202 → PENDING → COMPLETED → SENT).
+Если outbox лежит — перезапусти `./scripts/dc.sh stage restart outbox`; если broker недоступен — чини RabbitMQ, outbox сам переподключится и дошлёт. Учение: `make outbox-drill ENV=stage` (останавливает RabbitMQ, проверяет 202 → PENDING → COMPLETED → SENT, затем возвращает сервисы на версию из `.deploy-state-<env>` и проверяет health/версии). Для prod нужно явно `ALLOW_PROD_DRILL=1`.
 Идемпотентность API: проверка `make smoke-idempotency ENV=stage`; повтор с тем же `Idempotency-Key` и другим телом даёт 409.
 
 ## БД недоступна
 `api /health` → 503 `{"db":"down"}` (broker при этом остается `up` — чеки независимы, ~2.5s). `up --wait` или smoke упадёт; автооткат кода **не лечит БД** и может быть вреден. `/ready` тоже 503, пока БД недоступна. Чини инфраструктуру, затем повтори деплой:
 ```
-( cd deploy && docker compose --env-file env/<env>.env -f docker-compose.yml -f compose.<env>.yml up -d --wait db )
+./scripts/dc.sh <env> up -d --wait db
 ./deploy/vault/render-env.sh <env> --strict
 make migrate ENV=<env> && make deploy ENV=<env>
 ```
@@ -77,12 +77,12 @@ make migrate ENV=<env> && make deploy ENV=<env>
 ## Бэкап/восстановление
 `make backup ENV=<env>` → `backups/<env>/payments-*.sql.gz + .sha256` (0600), retention `KEEP_DAYS=14`.
 Проверка: `make restore FILE=backups/<env>/... ARGS="--verify-only" ENV=<env>` — checksum **обязателен**, дамп восстанавливается во временную БД с `ON_ERROR_STOP`; SQL-ошибка не даёт «verified».
-Регрессия: `make restore-selftest ENV=<env>` (валидный/битый/без checksum).
-Прод-восстановление: `make restore FILE=... ARGS="--apply" ENV=<env>` — сначала проверка в temp DB, затем safety-backup, остановка api/worker/outbox, DROP+dump в одной транзакции, migrator, api/worker/outbox, smoke. Если apply падает, транзакция откатывается и api/worker/outbox перезапускаются.
+Регрессия: `make restore-selftest ENV=<env>` (валидный/битый/без checksum) и `make restore-apply-selftest ENV=<env>` (реальный `--apply` во временную БД: текущая схема с `transfer_outbox`, pre-004 дамп + миграция 004, битый дамп не меняет БД).
+Прод-восстановление: `make restore FILE=... ARGS="--apply" ENV=<env>` — сначала проверка в temp DB, затем safety-backup, остановка api/worker/outbox, удаление всех таблиц public-схемы + разливка дампа в одной транзакции, migrator, api/worker/outbox, smoke. Если apply падает, транзакция откатывается и api/worker/outbox перезапускаются.
 Cron: `deploy/backup.cron` (`0 * * * * make backup ENV=stage`) — ставить на хосте; для prod отдельная строка/хост.
 
 ## Алерты и health
-- Alertmanager доставляет в `alert-sink` (`monitoring/alertmanager.yml`); `Watchdog` всегда горит — проверка `make alert-selftest ENV=<env>`.
+- Alertmanager доставляет в `alert-sink` (`monitoring/alertmanager.yml`); `Watchdog` всегда горит, а `make alert-selftest ENV=<env>` отправляет уникальный синтетический `SelfTest` и ждёт его в sink (старый Watchdog не даёт ложный зелёный).
 - `AlertSinkDown` — sink недоступен; `ApiDown/WorkerDown/RabbitMQDown/OutboxDown 2m`; `DbDown/BrokerDown` по `api_db_up/api_broker_up`; `WorkerNotReady/OutboxNotReady` по `worker_ready/outbox_ready`.
 - `OutboxStale/OutboxPendingHigh/OutboxPublishErrors/OrphanPending`, `DlqNonEmpty`, `TransferQueueBacklog`, `OldestPendingTooOld`, `PendingHigh`, `ApiSuccessRateLow`.
 - `BackupMissing/BackupStale` по `backup_last_success_timestamp_seconds`/`backup_age_seconds`; `ProviderCertMissing/ProviderCertExpiry` по `/metrics` mock-provider.

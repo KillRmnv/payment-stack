@@ -109,10 +109,10 @@ groups:
         annotations: {summary: "API p99 > 1s for 5m"}
       - alert: ApiSuccessRateLow
         expr: |
-          (sum(rate(api_requests_total{path="transfers",status=~"2.."}[5m]))
-           / clamp_min(sum(rate(api_requests_total{path="transfers"}[5m])), 0.000001) < 0.99)
+          (sum(rate(api_requests_total{method="POST",path="transfers",status=~"2.."}[5m]))
+           / clamp_min(sum(rate(api_requests_total{method="POST",path="transfers"}[5m])), 0.000001) < 0.99)
           and
-          (sum(rate(api_requests_total{path="transfers"}[5m])) > 0.01)
+          (sum(rate(api_requests_total{method="POST",path="transfers"}[5m])) > 0.01)
         for: 5m
         labels: {severity: warning}
         annotations: {summary: "Transfer API success rate <99% for 5m"}

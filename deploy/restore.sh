@@ -13,6 +13,10 @@
 # Usage:
 #   ./restore.sh <dump.sql.gz> [--verify-only] [env]
 #   ./restore.sh <dump.sql.gz> --apply [env]
+#
+# RESTORE_TARGET_DB is an internal test hook (default: payments). When it is
+# not "payments", --apply only drops/loads that database and skips the
+# service stop/start, migrator and smoke steps.
 set -euo pipefail
 
 FILE="${1:?usage: restore.sh <dump.sql.gz> [--verify-only|--apply] [env]}"
@@ -41,6 +45,15 @@ export APP_VERSION
 COMPOSE="docker compose --env-file env/$ENV.env -f docker-compose.yml -f compose.$ENV.yml"
 
 die() { echo "FATAL: $*" >&2; exit 1; }
+
+TARGET_DB="${RESTORE_TARGET_DB:-payments}"
+[[ "$TARGET_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+  || die "invalid RESTORE_TARGET_DB='$TARGET_DB' (expected a simple database name)"
+if [ "$TARGET_DB" = "payments" ]; then
+  LIVE_TARGET=1
+else
+  LIVE_TARGET=0
+fi
 
 [ -s "$RUNTIME_ENV_FILE" ] || die "missing/empty $RUNTIME_ENV_FILE; run ./vault/render-env.sh $ENV --strict first"
 
@@ -90,9 +103,16 @@ verify_into_tmp() {
   # ON_ERROR_STOP is mandatory: psql reading stdin returns 0 after SQL errors,
   # which used to make a partially restored dump look "verified".
   gunzip -c "$FILE" | psql_run "$TMPDB" --single-transaction >/dev/null
-  psql_run "$TMPDB" -c \
-    "SELECT count(*) AS transfers, count(*) FILTER (WHERE status='PENDING') AS pending FROM transfers;"
-  psql_run "$TMPDB" -c "SELECT count(*) AS schema_migrations FROM schema_migrations;"
+  TABLES="$(psql_run "$TMPDB" -tAc \
+    "SELECT count(*) FROM pg_tables WHERE schemaname='public'")"
+  if [ "$TABLES" -eq 0 ]; then
+    # Valid pre-migration backup of a fresh database: no user tables yet.
+    echo "empty database dump verified"
+  else
+    psql_run "$TMPDB" -c \
+      "SELECT count(*) AS transfers, count(*) FILTER (WHERE status='PENDING') AS pending FROM transfers;"
+    psql_run "$TMPDB" -c "SELECT count(*) AS schema_migrations FROM schema_migrations;"
+  fi
   cleanup_tmp_db
   echo "restore verified"
 }
@@ -105,22 +125,50 @@ fi
 # --apply: verify first, so an invalid dump never reaches the live database.
 verify_into_tmp
 
-echo "taking safety backup before --apply..."
-./backup.sh "$ENV"
+# Drop every table in the public schema instead of a hardcoded list. A list
+# broke restore as soon as 004 added transfer_outbox: the dump contains
+# CREATE TABLE transfer_outbox, while the old table was not dropped. Dropping
+# all tables also survives future migrations that add more tables.
+# Compute this before stopping services: if the query fails, the API/worker
+# keep running instead of being left stopped by `set -e`.
+DROP_SQL="$(psql_run "$TARGET_DB" -tAc "
+  SELECT COALESCE(string_agg(format('DROP TABLE IF EXISTS public.%I CASCADE', tablename), '; '), '')
+  FROM pg_tables WHERE schemaname = 'public'
+")"
 
-echo "WARNING: restoring dump into LIVE database 'payments' (ENV=$ENV)." >&2
-echo "api/worker/outbox will be stopped during restore." >&2
-$COMPOSE stop api worker outbox
+if [ "$LIVE_TARGET" = 1 ]; then
+  echo "taking safety backup before --apply..."
+  ./backup.sh "$ENV"
+fi
+
+if [ "$LIVE_TARGET" = 1 ]; then
+  echo "WARNING: restoring dump into LIVE database 'payments' (ENV=$ENV)." >&2
+  echo "api/worker/outbox will be stopped during restore." >&2
+  $COMPOSE stop api worker outbox
+else
+  echo "test target: applying dump to temporary database '$TARGET_DB' (services untouched)" >&2
+fi
 
 # DROP + dump are one transaction: on a SQL error PostgreSQL rolls it back and
 # the previous tables/data remain intact.
-if ! { printf 'DROP TABLE IF EXISTS transfers, schema_migrations CASCADE;\n'; gunzip -c "$FILE"; } \
-  | psql_run payments --single-transaction >/dev/null; then
-  echo "FATAL: dump apply failed and was rolled back; restarting api/worker on the previous schema." >&2
-  $COMPOSE up -d api worker outbox || true
+if ! { printf '%s;\n' "$DROP_SQL"; gunzip -c "$FILE"; } \
+  | psql_run "$TARGET_DB" --single-transaction >/dev/null; then
+  if [ "$LIVE_TARGET" = 1 ]; then
+    echo "FATAL: dump apply failed and was rolled back; restarting api/worker on the previous schema." >&2
+    $COMPOSE up -d api worker outbox || true
+  else
+    echo "FATAL: test dump apply failed and was rolled back for '$TARGET_DB'." >&2
+  fi
   exit 1
 fi
-echo "dump applied"
+echo "dump applied to $TARGET_DB"
+
+# The test hook stops here: migrations/smoke are live-stack operations. The
+# regression test drives 004 explicitly against its temporary database.
+if [ "$LIVE_TARGET" = 0 ]; then
+  echo "restore --apply test target OK ($TARGET_DB)"
+  exit 0
+fi
 
 echo "running migrations..."
 if ! APP_VERSION="${APP_VERSION:-$(../scripts/version.sh)}" \

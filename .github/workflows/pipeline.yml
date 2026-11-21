@@ -127,10 +127,23 @@ jobs:
           path: release.env
           retention-days: 30
 
+  deploy-smoke:
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean deploy + smoke + DR regressions
+        run: ./scripts/deploy-smoke.sh
+
   deploy-stage:
     needs: build-scan-push
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.STAGE_DEPLOY_ENABLED == 'true'
     runs-on: [self-hosted, linux, stage]
+    timeout-minutes: 30
     environment: stage
     concurrency:
       group: deploy-stage
@@ -161,9 +174,17 @@ jobs:
           make smoke-idempotency ENV=stage
 
   deploy-prod:
-    needs: deploy-stage
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PROD_DEPLOY_ENABLED == 'true'
+    needs: [build-scan-push, deploy-stage]
+    # Allow prod-only operation when stage is intentionally disabled. A failed
+    # stage still blocks prod; a skipped stage does not.
+    if: >
+      always() && !cancelled() &&
+      needs.build-scan-push.result == 'success' &&
+      (needs.deploy-stage.result == 'success' || needs.deploy-stage.result == 'skipped') &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      vars.PROD_DEPLOY_ENABLED == 'true'
     runs-on: [self-hosted, linux, prod]
+    timeout-minutes: 30
     environment: prod
     concurrency:
       group: deploy-prod

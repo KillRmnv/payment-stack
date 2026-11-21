@@ -18,7 +18,7 @@ from .idempotency import (
     normalize_key,
     request_hash,
 )
-from .validation import InvalidTransfer, parse_transfer, to_minor
+from .validation import InvalidTransfer, format_minor, parse_transfer, to_minor
 
 settings = load_settings()
 logging.basicConfig(
@@ -116,7 +116,7 @@ def row_to_json(row):
     # client_ip хранится в БД, но наружу не отдаем (PII, без auth любой мог читать чужое).
     return {
         "id": str(row[0]),
-        "amount": f"{row[1] / 100:.2f}",
+        "amount": format_minor(row[1]),
         "currency": row[2],
         "recipient": row[3],
         "status": row[4],

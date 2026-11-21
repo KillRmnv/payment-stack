@@ -2,7 +2,7 @@
 
 ## Dashboard `dashboard.json` (uid `payments-10s`)
 10 панелей:
-- transfer success rate (transfers-only 2xx/all, fixed denominator);
+- transfer success rate (POST `/transfers` 2xx/all, fixed denominator);
 - pending count;
 - oldest pending;
 - worker poison/retry/dlq rate + `worker_dlq_published_total`;
@@ -38,4 +38,4 @@ DLQ разбирается `make dlq-replay ENV=stage ARGS="--dry-run"`.
 `api /ready`, `worker/outbox /health`, `reverse-proxy /healthz`, Prometheus/Alertmanager `/-/healthy`, alert-sink `/health`, db/rabbit/vault/mock-provider — свои healthcheck'и. `deploy.sh` использует `up --wait`, поэтому мониторинг тоже участвует в готовности деплоя.
 
 ## Alertmanager
-`alertmanager:9093` доставляет в `alert-sink:8080/alerts` (локальный webhook), `Watchdog` всегда горит. Внешний pager/email подключается заменой URL в `monitoring/alertmanager.yml`; `AlertSinkDown` ловит падение sink. Deploy перезагружает Prometheus, Alertmanager и nginx.
+`alertmanager:9093` доставляет в `alert-sink:8080/alerts` (локальный webhook), `Watchdog` всегда горит, а `make alert-selftest` отправляет уникальный `SelfTest` и проверяет его в sink. Внешний pager/email подключается заменой URL в `monitoring/alertmanager.yml`; `AlertSinkDown` ловит падение sink. Deploy перезагружает Prometheus, Alertmanager и nginx, пересоздаёт `alert-sink`; изменения `rabbitmq.conf` требуют отдельного рестарта RabbitMQ.

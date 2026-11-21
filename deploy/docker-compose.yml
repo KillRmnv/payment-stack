@@ -101,10 +101,10 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    # API writes transfers + outbox to PostgreSQL only. It must be able to
+    # start while RabbitMQ is down (the outbox relay owns broker delivery).
     depends_on:
       db:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     restart: unless-stopped
     logging:
@@ -208,7 +208,9 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost/healthz >/dev/null"]
+      # 127.0.0.1, not localhost: BusyBox wget may resolve localhost to ::1
+      # while nginx listens on IPv4 only (listen 80), which makes up --wait fail.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -242,10 +244,14 @@ services:
   alert-sink:
     image: python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
     command: ["python", "/app/alert-sink.py"]
+    # Stock python image defaults to root; the sink only needs to read its
+    # bind-mounted script and listen on 8080.
+    user: "65534:65534"
     volumes:
       - ../monitoring/alert-sink.py:/app/alert-sink.py:ro
     environment:
       ALERT_SINK_PORT: 8080
+      PYTHONDONTWRITEBYTECODE: "1"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3)\""]
       interval: 10s

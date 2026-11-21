@@ -7,7 +7,7 @@ RUNTIME_ENV = $(if $(PAYMENT_STACK_RUNTIME_ENV),$(PAYMENT_STACK_RUNTIME_ENV),run
 # ensure_vault_token также выставляет COMPOSE_PROJECT_NAME/STACK_ENV/RUNTIME_ENV_FILE.
 ENVLOAD = . ./lib/env.sh && ensure_vault_token $(ENV)
 
-.PHONY: up down deploy migrate smoke smoke-idempotency outbox-drill alert-selftest rollback backup restore restore-selftest dlq-replay lint test build scan ci config-check no-destructive package
+.PHONY: up down deploy deploy-smoke migrate smoke smoke-idempotency outbox-drill alert-selftest rollback backup restore restore-selftest restore-apply-selftest dlq-replay lint test build scan ci config-check no-destructive package
 
 config-check:
 	cd deploy && $(ENVLOAD) && { test -f $(RUNTIME_ENV) || touch $(RUNTIME_ENV); } && $(COMPOSE) config >/dev/null
@@ -20,6 +20,9 @@ migrate:
 
 deploy: no-destructive
 	cd deploy && ENV=$(ENV) APP_VERSION=$(APP_VERSION) ./deploy.sh $(ENV)
+
+deploy-smoke:
+	./scripts/deploy-smoke.sh
 
 smoke:
 	./scripts/smoke.sh $(ENV)
@@ -40,10 +43,13 @@ backup:
 	cd deploy && ./backup.sh $(ENV)
 
 restore:
-	cd deploy && ./restore.sh $(FILE) $(ARGS) $(ENV)
+	cd deploy && ./restore.sh $(FILE) $(if $(ARGS),$(ARGS),--verify-only) $(ENV)
 
 restore-selftest:
 	./scripts/restore-selftest.sh $(ENV)
+
+restore-apply-selftest:
+	./scripts/restore-apply-selftest.sh $(ENV)
 
 dlq-replay:
 	./scripts/dlq-replay.sh $(ENV) $(ARGS)

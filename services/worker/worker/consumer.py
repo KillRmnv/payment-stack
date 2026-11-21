@@ -8,6 +8,7 @@ from prometheus_client import Counter, Gauge
 from .config import load_settings
 from .healthserver import HealthState, start_health_server
 from .messages import PoisonMessage, parse_message, parse_retry_count
+from .money import format_minor
 from .provider import ProviderProtocolError, send_payout
 
 log = logging.getLogger("worker")
@@ -36,9 +37,7 @@ def process(settings, body):
                 "transfer_id=%s request_id=%s duplicate status=%s", transfer_id, request_id, status
             )
             return "duplicate"
-        payout = send_payout(
-            settings, transfer_id, f"{amount_minor / 100:.2f}", currency, recipient
-        )
+        payout = send_payout(settings, transfer_id, format_minor(amount_minor), currency, recipient)
         conn.execute(
             "UPDATE transfers SET status = %s, provider_reference = %s, updated_at = now() WHERE id = %s",
             (payout["status"], payout["payout_id"], transfer_id),

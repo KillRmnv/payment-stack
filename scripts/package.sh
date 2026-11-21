@@ -25,7 +25,9 @@ done
 ! grep -rInE "ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY" \
   --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache \
   --include="*.py" --include="*.sh" --include="*.yml" --include="*.yaml" \
-  --include="*.env" --include="*.example" --include="*.conf" . 2>/dev/null || {
+  --include="*.env" --include="*.example" --include="*.conf" \
+  --include="*.md" --include="*.json" --include="*.sql" --include="*.cron" \
+  --include="*.txt" --include="Dockerfile" . 2>/dev/null || {
   echo "FATAL: token-like string or private key found in repo" >&2
   exit 1
 }

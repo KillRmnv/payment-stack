@@ -48,5 +48,11 @@ fi
 # A manual rollback is a new "last good" release: without this write the next
 # deploy would treat the bad version in .deploy-state as PREV.
 echo "$VERSION" > "$STATE_FILE"
-printf '%s\trollback\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION" >> "$HISTORY_FILE"
+{
+  printf '%s\trollback\t%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION"
+  for image in northwind/payment-api northwind/payment-worker northwind/mock-provider; do
+    printf '\t%s' "$(docker image inspect "$image:$VERSION" --format '{{.Id}}' 2>/dev/null || echo missing)"
+  done
+  printf '\n'
+} >> "$HISTORY_FILE"
 echo "rollback OK $VERSION"

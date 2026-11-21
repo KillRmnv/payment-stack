@@ -45,4 +45,10 @@ if ./restore.sh "$TMP/nosum.sql.gz" --verify-only "$ENV" >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "4) empty pre-migration dump must verify"
+: > "$TMP/empty.sql"
+gzip -c "$TMP/empty.sql" > "$TMP/empty.sql.gz"
+( cd "$TMP" && sha256sum empty.sql.gz > empty.sql.gz.sha256 )
+./restore.sh "$TMP/empty.sql.gz" --verify-only "$ENV" >/dev/null
+
 echo "restore selftest OK"

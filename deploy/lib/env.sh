@@ -42,7 +42,7 @@ acquire_deploy_lock() {
 # stage and prod must never share containers, volumes or secrets.
 # PAYMENT_STACK_PROJECT is an explicit escape hatch for migrating an old stand.
 ensure_vault_token() {
-  local env="${1:-stage}" repo token_file
+  local env="${1:-stage}" repo token_file existing
   if ! [[ "$env" =~ ^[a-z0-9_-]+$ ]]; then
     echo "FATAL: invalid ENV='$env' (use stage/prod)" >&2
     return 1
@@ -52,15 +52,30 @@ ensure_vault_token() {
   export STACK_ENV="$env"
   export RUNTIME_ENV_FILE="${PAYMENT_STACK_RUNTIME_ENV:-runtime.$env.env}"
   export COMPOSE_PROJECT_NAME="${PAYMENT_STACK_PROJECT:-payment-stack-$env}"
-  if [ -z "${VAULT_DEV_ROOT_TOKEN:-}" ]; then
+  if [ -n "${VAULT_DEV_ROOT_TOKEN:-}" ]; then
     if [ -f "$token_file" ]; then
-      VAULT_DEV_ROOT_TOKEN="$(cat "$token_file")"
+      existing="$(cat "$token_file")"
+      if [ "$existing" != "$VAULT_DEV_ROOT_TOKEN" ]; then
+        echo "FATAL: VAULT_DEV_ROOT_TOKEN differs from $token_file." >&2
+        echo "HINT: unset VAULT_DEV_ROOT_TOKEN to reuse the saved token, or remove" >&2
+        echo "      $token_file intentionally (this recreates dev Vault and wipes secrets)." >&2
+        return 1
+      fi
     else
-      VAULT_DEV_ROOT_TOKEN="$(_gen_secret)"
+      umask 077
       printf '%s\n' "$VAULT_DEV_ROOT_TOKEN" > "$token_file"
       chmod 600 "$token_file"
-      echo "generated $token_file (gitignored, keep it: token change wipes dev Vault)" >&2
+      echo "recorded $token_file (gitignored, keep it: token change wipes dev Vault)" >&2
     fi
+  elif [ -f "$token_file" ]; then
+    VAULT_DEV_ROOT_TOKEN="$(cat "$token_file")"
+    chmod 600 "$token_file" 2>/dev/null || true
+  else
+    VAULT_DEV_ROOT_TOKEN="$(_gen_secret)"
+    umask 077
+    printf '%s\n' "$VAULT_DEV_ROOT_TOKEN" > "$token_file"
+    chmod 600 "$token_file"
+    echo "generated $token_file (gitignored, keep it: token change wipes dev Vault)" >&2
   fi
   export VAULT_DEV_ROOT_TOKEN
 }

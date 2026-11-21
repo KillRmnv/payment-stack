@@ -147,6 +147,15 @@ if ! $COMPOSE up -d --remove-orphans --wait; then
   exit 1
 fi
 
+# alert-sink.py is bind-mounted; Compose does not restart an already-running
+# process when the file content changes. Recreate the tiny sink every deploy so
+# its code is actually applied. RabbitMQ config still needs an explicit restart
+# (see LIMITS.md) because recreating it interrupts the queue.
+if ! $COMPOSE up -d --wait --force-recreate alert-sink >/dev/null; then
+  echo "FATAL: alert-sink did not become ready after recreate" >&2
+  exit 1
+fi
+
 # nginx.conf/monitoring — bind-mount; `up` их не перечитывает. Graceful reload,
 # чтобы правки edge/алертов применялись при деплое (битый конфиг -> старый жив).
 if $COMPOSE exec -T reverse-proxy nginx -t >/dev/null 2>&1; then
