@@ -32,7 +32,7 @@ Prod: `make deploy ENV=prod` (порт 8081, проверка `curl http://local
 - `make smoke-idempotency ENV=stage` — проверка `Idempotency-Key`: повтор с тем же телом → 200/тот же id, другое тело → 409.
 - `make outbox-drill ENV=stage` — учение: остановить RabbitMQ, создать перевод (202 + outbox PENDING), поднять RabbitMQ, дождаться COMPLETED/SENT. Останавливает RabbitMQ на стенде.
 - `make alert-selftest ENV=stage` — проверка цепочки Alertmanager → alert-sink по всегда-горящему `Watchdog`.
-- `make ci` — локальные lint+test+build; полный CI в `.github/workflows/ci.yml` + `cd.yml`
+- `make ci` — локальные lint+test+build; полный pipeline в `.github/workflows/pipeline.yml` (test → build/scan/push → deploy stage → deploy prod с approval)
 - `./scripts/smoke.sh [stage|prod]` — host smoke; `./scripts/smoke-net.sh [stage|prod]` — тот же smoke изнутри сети (нужен при VPN на хосте)
 - `./scripts/status.sh [stage|prod]` — статусы, health (host + in-network fallback), ключевые метрики
 - `./scripts/package.sh [out.zip]` — сборка ZIP для сдачи без секретов: исключаются `runtime*.env`, токены, state/history, `backups`, `.git`; в ZIP кладётся сгенерированный `VERSION`.
@@ -41,6 +41,6 @@ Prod: `make deploy ENV=prod` (порт 8081, проверка `curl http://local
 Секреты: источник — Vault `secret/payment-stack/<env>`. Нет секрета → `render-env.sh --strict` падает с `FATAL`, сервисы не стартуют. Vault-токен обязателен явно (`README` export или `deploy.sh` генерирует в `.vault-token-<env>`); дефолта `dev-only-root-token` больше нет — compose падает с понятным FATAL. Файлы секретов теперь per-env: `deploy/runtime.stage.env` / `deploy/runtime.prod.env` (0600, не коммитить). **Ротация: `./deploy/vault/rotate.sh <env>`**, а не `seed --force`: прямой `seed --force` с новым паролем на существующем `pgdata` ломает аутентификацию.
 Компоуз: `docker-compose.yml + compose.<env>.yml`; проекты `payment-stack-stage` и `payment-stack-prod` изолированы (контейнеры, тома, `runtime.<env>.env`, `backups/<env>`). Stage открывает 15672/9090 только на `127.0.0.1`, prod — ничего лишнего. Для старого стенда с проектом `deploy` есть явный escape hatch: `PAYMENT_STACK_PROJECT=deploy PAYMENT_STACK_RUNTIME_ENV=runtime.env make deploy ENV=stage`.
 Миграции: `migrator` one-shot до раскатки, advisory lock, откат схемы не поддерживается (автооткат чинит только код).
-CI proof: `docs/ci-proof.md` (исторический прогон; после изменений запускать заново).
+CI proof: `docs/ci-proof.md` (исторический прогон; текущий pipeline — `.github/workflows/pipeline.yml`). CD включается repository variables `STAGE_DEPLOY_ENABLED`/`PROD_DEPLOY_ENABLED`, путями `STAGE_DEPLOY_PATH`/`PROD_DEPLOY_PATH` и self-hosted runners с labels `stage`/`prod`; stage дополнительно прогоняет `alert-selftest` и `smoke-idempotency`.
 Мониторинг: RabbitMQ Prometheus plugin (`rabbitmq:15692`) даёт глубину очередей; `DlqNonEmpty` срабатывает на `transfers.dlq > 0`; `outbox:8002` отдаёт pending/oldest/publish errors; `api_db_up`/`api_broker_up` — доступность БД/брокера. Alertmanager доставляет в локальный `alert-sink`, `Watchdog` — dead man's switch; внешний pager подключается заменой URL. Дашборд: `monitoring/dashboard.json` (uid `payments-10s`, 10 панелей), алерты `monitoring/alerts.yml`.
 Подробно: `docs/ARCHITECTURE.md`, `docs/RUNBOOK.md`, `docs/DECISIONS.md`, `docs/ASSUMPTIONS.md`, `docs/LIMITS.md`.

@@ -1,6 +1,6 @@
 # CI proof (local, 2026-11-20)
 
-> Historical proof for commit `64d1999`. Follow-up changes (version/env isolation, restore hardening, RabbitMQ DLQ metrics/replay, worker validation) are not covered by this run; re-run `make ci` / `ci.yml` before submission.
+> Historical proof for commit `64d1999`. Current pipeline is `.github/workflows/pipeline.yml` (test → build/scan/push → deploy stage/prod); this historical log is not proof for the current HEAD. Re-run the pipeline and update this file with the new run links before submission.
 
 
 Machine: Linux + Docker 29.10.0 + Compose v5.8.0, Python 3.12, commit `64d1999`, `2026-11-20T19:40:42Z`.

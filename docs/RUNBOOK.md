@@ -7,6 +7,13 @@ Deploy берёт `.deploy-lock-<env>` (`flock`), отказывается со�
 Версия: `APP_VERSION` → git SHA → `VERSION` → `nogit-<UTC>`. Успешный деплой пишет `.deploy-state-<env>` и строку в `.deploy-history-<env>` (timestamp, version, image IDs).
 В prod debug-порты (15672/9090) не публикуются; в stage — только на `127.0.0.1`. RabbitMQ Prometheus plugin (`:15692`) доступен только внутри compose-сети.
 
+## CD (GitHub Actions)
+Pipeline `.github/workflows/pipeline.yml`: `test → build-scan-push → deploy-stage → deploy-prod`.
+Включается repository variables:
+- `STAGE_DEPLOY_ENABLED=true`, `STAGE_DEPLOY_PATH=/opt/payment-stack`, опционально `STAGE_PROJECT`/`STAGE_RUNTIME_ENV`;
+- `PROD_DEPLOY_ENABLED=true`, `PROD_DEPLOY_PATH=...`, опционально `PROD_PROJECT`/`PROD_RUNTIME_ENV`.
+Нужны self-hosted runners с labels `stage`/`prod`, Git/Docker/make и persistent checkout path с runtime/Vault-секретами. Prod использует environment approval. Deploy делает `git fetch && git checkout --force $GITHUB_SHA`, затем `make deploy`, stage дополнительно `alert-selftest` и `smoke-idempotency`. Без runners/vars deploy jobs пропускаются, pipeline остаётся зелёным. Registry images (full/short SHA) — артефакт сборки/rollback, deploy собирает тот же SHA локально.
+
 ## Smoke: хост vs сеть
 Хост может не доставать до published-портов (VPN/файрвол режет host→bridge). `deploy.sh`, `rollback.sh` и `restore.sh` сами выбирают: есть `curl` **и** `python3` и доступен `localhost:${API_PORT}/health` → `smoke.sh`, иначе → `scripts/smoke-net.sh` (тот же сценарий POST→COMPLETED, но трафик внутри compose-сети через `reverse-proxy`). Вручную: `SMOKE_BASE=http://reverse-proxy ./scripts/smoke.sh` не выйдет (curl с хоста) — используй `smoke-net.sh`. Проверка учениями — только in-network. `status.sh` тоже умеет fallback (host → exec через worker).
 
